@@ -85,12 +85,19 @@ function loadEnvKeys() {
   return keys;
 }
 
+// SECURITY: nunca monte "git " + args.join(' ') e rode via exec/shell.
+// String de comando passa por /bin/sh e $(...) ou `...` executam mesmo
+// dentro de aspas. Só array pro spawn/execFile (execve) elimina RCE via
+// mensagem de commit, path de diff/show, etc.
 function runGit(args, callback) {
   const { spawn } = require('child_process');
+  if (!Array.isArray(args)) {
+    return callback({ success: false, output: '', error: 'runGit: args deve ser array' });
+  }
   const child = spawn('git', args, {
     cwd: WORKSPACE,
-    timeout: 60000,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    shell: false,
   });
   let stdout = '';
   let stderr = '';

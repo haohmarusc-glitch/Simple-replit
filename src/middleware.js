@@ -76,12 +76,12 @@ function setupSecurity(app) {
       origin(origin, cb) {
         if (!origin) return cb(null, true);
         if (ALLOWED_ORIGINS.length === 0) {
+          // Sem ALLOWED_ORIGINS: só localhost. Em produção defina
+          // ALLOWED_ORIGINS no env. Nunca hardcode IP/domínio real aqui
+          // (repo público).
           try {
             const u = new URL(origin);
-            const ok =
-              u.hostname === 'localhost' ||
-              u.hostname === '127.0.0.1' ||
-              u.hostname === '65.108.154.111';
+            const ok = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
             return cb(null, ok);
           } catch {
             return cb(null, false);

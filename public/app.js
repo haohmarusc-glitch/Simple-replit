@@ -8,6 +8,15 @@ let dirty = false;
 /** @type {{path:string, content:string, language:string, dirty:boolean}[]} */
 let openTabs = [];
 
+// ========== ESCAPE HTML ==========
+// Nomes de arquivo/caminho vêm do filesystem ou do git — nunca são
+// confiáveis para innerHTML (ex: "<img src=x onerror=...>" via /api/folder).
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
 // ========== TOAST ==========
 function toast(msg, type = 'info') {
   let wrap = document.getElementById('toastWrap');
@@ -227,7 +236,7 @@ function renderEditorTabs() {
     el.type = 'button';
     el.className = 'editor-tab' + (tab.path === currentFile ? ' active' : '') + (tab.dirty ? ' dirty' : '');
     const name = tab.path.split('/').pop();
-    el.innerHTML = `<span class="tab-name">${name}${tab.dirty ? ' •' : ''}</span><span class="tab-close" title="Fechar">×</span>`;
+    el.innerHTML = `<span class="tab-name">${escapeHtml(name)}${tab.dirty ? ' •' : ''}</span><span class="tab-close" title="Fechar">×</span>`;
     el.title = tab.path;
     el.onclick = (e) => {
       if (e.target.classList.contains('tab-close')) {
@@ -352,7 +361,7 @@ function renderFileTree() {
       if (currentFile === item.path) div.classList.add('active');
 
       const icon = item.type === 'folder' ? '📁' : getFileIcon(item.name);
-      div.innerHTML = `<span class="icon">${icon}</span><span>${item.name}</span>`;
+      div.innerHTML = `<span class="icon">${icon}</span><span>${escapeHtml(item.name)}</span>`;
 
       div.onclick = (e) => {
         e.stopPropagation();
@@ -584,8 +593,8 @@ function promptName(title, value) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
-    overlay.innerHTML = `<div class="modal-box"><h3>${title}</h3>
-      <input id="modalInput" type="text" value="${(value || '').replace(/"/g, '&quot;')}" />
+    overlay.innerHTML = `<div class="modal-box"><h3>${escapeHtml(title)}</h3>
+      <input id="modalInput" type="text" value="${escapeHtml(value || '')}" />
       <div class="modal-actions">
         <button type="button" class="btn" data-act="cancel">Cancelar</button>
         <button type="button" class="btn btn-primary" data-act="ok">OK</button>
@@ -608,7 +617,7 @@ function promptConfirm(msg) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
-    overlay.innerHTML = `<div class="modal-box"><h3>Confirmar</h3><p>${msg}</p>
+    overlay.innerHTML = `<div class="modal-box"><h3>Confirmar</h3><p>${escapeHtml(msg)}</p>
       <div class="modal-actions">
         <button type="button" class="btn" data-act="cancel">Cancelar</button>
         <button type="button" class="btn btn-danger" data-act="ok">Deletar</button>
@@ -872,8 +881,8 @@ async function openGitPanel(tab) {
       const row = document.createElement('div');
       row.className = 'git-file-row';
       row.innerHTML = `
-        <span class="diff-badge ${f.status}">${(f.status || '?')[0]}</span>
-        <span class="git-file-path" title="${f.path}">${f.path}</span>
+        <span class="diff-badge ${escapeHtml(f.status)}">${escapeHtml((f.status || '?')[0])}</span>
+        <span class="git-file-path" title="${escapeHtml(f.path)}">${escapeHtml(f.path)}</span>
         <div class="git-file-actions">
           <button type="button" class="btn" data-act="diff">Diff</button>
           <button type="button" class="btn" data-act="open">Abrir</button>
@@ -994,8 +1003,8 @@ async function openGitPanel(tab) {
       const row = document.createElement('div');
       row.className = 'git-history-row';
       row.innerHTML = `
-        <div><span class="gh-hash">${c.hash}</span><span class="gh-msg">${c.message || ''}</span></div>
-        <div class="gh-meta">${c.author || ''} · ${c.when || ''}</div>`;
+        <div><span class="gh-hash">${escapeHtml(c.hash)}</span><span class="gh-msg">${escapeHtml(c.message || '')}</span></div>
+        <div class="gh-meta">${escapeHtml(c.author || '')} · ${escapeHtml(c.when || '')}</div>`;
       body.appendChild(row);
     });
   }
@@ -1170,7 +1179,7 @@ async function openGitDiff(preferPath) {
       row.className = 'diff-file-row' + (f.path === selectedPath ? ' active' : '');
       row.dataset.path = f.path;
       row.dataset.status = f.status;
-      row.innerHTML = `<span class="diff-badge ${f.status}">${f.status.slice(0, 1)}</span><span class="diff-file-path" title="${f.path}">${f.path}</span>`;
+      row.innerHTML = `<span class="diff-badge ${escapeHtml(f.status)}">${escapeHtml(f.status.slice(0, 1))}</span><span class="diff-file-path" title="${escapeHtml(f.path)}">${escapeHtml(f.path)}</span>`;
       row.onclick = () => {
         selectedPath = f.path;
         selectedStatus = f.status;

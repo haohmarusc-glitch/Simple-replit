@@ -60,15 +60,26 @@ npm start
 
 ## Variáveis de ambiente
 
-| Variável          | Descrição                                      | Padrão              |
-|-------------------|------------------------------------------------|---------------------|
-| `PORT`            | Porta do servidor                              | `3000`              |
-| `WORKSPACE_PATH`  | Caminho absoluto da pasta do projeto a editar  | `./workspace`       |
+| Variável          | Descrição                                                        | Padrão              |
+|-------------------|-------------------------------------------------------------------|---------------------|
+| `AUTH_TOKEN`      | **Obrigatório em VPS exposta.** Sem ele a API roda sem auth. Gere com `openssl rand -hex 32`. | *(vazio = sem auth)* |
+| `ALLOWED_ORIGINS` | Domínios/IPs aceitos por CORS, separados por vírgula             | *(vazio = só localhost)* |
+| `PORT`            | Porta do servidor                                                | `3000`              |
+| `WORKSPACE_PATH`  | Caminho absoluto da pasta do projeto a editar                    | `./workspace`       |
+| `BACKUP_PATH`     | Pasta onde ficam os backups `.tar.gz`                            | `./backups`         |
+| `SHELL_MODE`      | `open` remove a whitelist do `/api/shell` — só temporariamente   | *(vazio = whitelist)* |
+
+Veja `.env.example` para copiar e preencher.
+
+## Segurança
+
+- `runGit` usa `spawn` com array de argumentos (**sem shell**) — evita RCE via mensagem de commit ou paths.
+- CORS sem `ALLOWED_ORIGINS` libera apenas `localhost` / `127.0.0.1`.
+- Nomes de arquivo escapados no frontend (`escapeHtml`) antes de `innerHTML`.
+- Shell com whitelist por padrão (`SHELL_MODE` vazio).
 
 ## Próximas melhorias possíveis
 
-- Terminal interativo
-- Suporte a mais linguagens
-- Git status / diff básico
-- Busca de arquivos (Ctrl+P)
 - Multi-root / vários projetos
+- Stage seletivo no commit UI
+- Terminal PTY interativo (node-pty)
