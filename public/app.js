@@ -717,3 +717,74 @@ fetch('/api/ai/status').then(r => r.json()).then(s => {
     console.warn('Nenhuma API key de IA configurada (GROQ_API_KEY / DEEPSEEK_API_KEY)');
   }
 }).catch(() => {});
+
+// ========== MODO PC / CELULAR ==========
+const modeSelect = document.getElementById('modeSelect');
+const sidebar = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
+const moreMenu = document.getElementById('moreMenu');
+
+function detectDefaultMode() {
+  return window.matchMedia('(max-width: 768px)').matches ? 'mobile' : 'desktop';
+}
+
+function applyMode(mode) {
+  let effective = mode;
+  if (mode === 'auto') effective = detectDefaultMode();
+
+  document.body.classList.remove('mode-mobile', 'mode-desktop');
+  document.body.classList.add(effective === 'mobile' ? 'mode-mobile' : 'mode-desktop');
+
+  if (sidebar) sidebar.classList.remove('open');
+  if (sidebarOverlay) sidebarOverlay.style.display = 'none';
+  if (moreMenu) moreMenu.style.display = 'none';
+
+  localStorage.setItem('sr_mode', mode);
+
+  setTimeout(() => {
+    if (typeof editor !== 'undefined' && editor) editor.layout();
+  }, 100);
+}
+
+(function initMode() {
+  const saved = localStorage.getItem('sr_mode') || 'auto';
+  if (modeSelect) {
+    modeSelect.value = saved;
+    modeSelect.onchange = () => applyMode(modeSelect.value);
+  }
+  applyMode(saved);
+  window.addEventListener('resize', () => {
+    if (modeSelect && modeSelect.value === 'auto') applyMode('auto');
+  });
+})();
+
+document.getElementById('btnToggleSidebar')?.addEventListener('click', () => {
+  sidebar?.classList.add('open');
+  if (sidebarOverlay) sidebarOverlay.style.display = 'block';
+});
+document.getElementById('btnCloseSidebar')?.addEventListener('click', () => {
+  sidebar?.classList.remove('open');
+  if (sidebarOverlay) sidebarOverlay.style.display = 'none';
+});
+sidebarOverlay?.addEventListener('click', () => {
+  sidebar?.classList.remove('open');
+  sidebarOverlay.style.display = 'none';
+});
+
+document.getElementById('btnMore')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!moreMenu) return;
+  moreMenu.style.display = moreMenu.style.display === 'none' ? 'flex' : 'none';
+});
+document.addEventListener('click', (e) => {
+  if (moreMenu && moreMenu.style.display !== 'none') {
+    if (!moreMenu.contains(e.target) && e.target.id !== 'btnMore') {
+      moreMenu.style.display = 'none';
+    }
+  }
+});
+moreMenu?.querySelectorAll('button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setTimeout(() => { moreMenu.style.display = 'none'; }, 150);
+  });
+});

@@ -13,8 +13,9 @@
     <!-- Top bar -->
     <header class="topbar">
       <div class="logo">
+        <button id="btnToggleSidebar" class="btn-icon mobile-only" title="Arquivos">☰</button>
         <span class="logo-icon">◈</span>
-        <span>Simple Replit</span>
+        <span class="logo-text">Simple Replit</span>
       </div>
       <div class="top-actions">
         <select id="languageSelect" title="Linguagem">
@@ -24,42 +25,48 @@
           <option value="css">CSS</option>
           <option value="markdown">Markdown</option>
         </select>
-        <button id="btnRun" class="btn btn-primary" title="Rodar (Ctrl+Enter)">
-          ▶ Rodar
-        </button>
-        <button id="btnSave" class="btn" title="Salvar (Ctrl+S)">
-          💾 Salvar
-        </button>
-        <div class="git-actions">
-          <button id="btnGitStatus" class="btn" title="Git status">Status</button>
-          <button id="btnGitPull" class="btn" title="Git pull">Pull</button>
-          <button id="btnGitCommit" class="btn" title="Git add + commit">Commit</button>
-          <button id="btnGitPush" class="btn" title="Git push">Push</button>
-          <button id="btnApiKeys" class="btn btn-keys" title="Abrir .env (API keys)">🔑 API Keys</button>
-          <button id="btnSecrets" class="btn btn-keys" title="Listar secrets (.env)">🔒 Secrets</button>
-          <button id="btnDeploy" class="btn btn-deploy" title="Git pull + docker compose up --build">🚀 Deploy</button>
-          <button id="btnMonitor" class="btn" title="CPU, RAM, disco, containers">📊 Monitor</button>
-          <button id="btnRestartApp" class="btn" title="docker compose restart app">↻ Restart</button>
-          <button id="btnLogs" class="btn btn-logs" title="Logs do workflow/agente ao vivo">📋 Workflow</button>
-          <button id="btnLogsAll" class="btn btn-logs" title="Todos os containers">📦 All Logs</button>
-          <button id="btnStopLogs" class="btn btn-stop" title="Parar stream de logs" style="display:none;">⏹ Parar</button>
-        </div>
+        <button id="btnRun" class="btn btn-primary" title="Rodar (Ctrl+Enter)">▶ <span class="btn-label">Rodar</span></button>
+        <button id="btnSave" class="btn" title="Salvar (Ctrl+S)">💾 <span class="btn-label">Salvar</span></button>
+        <button id="btnDeploy" class="btn btn-deploy" title="Deploy">🚀 <span class="btn-label">Deploy</span></button>
+        <button id="btnMore" class="btn" title="Mais ações">⋯</button>
+        <select id="modeSelect" class="mode-select" title="Modo de interface">
+          <option value="auto">Auto</option>
+          <option value="desktop">💻 PC</option>
+          <option value="mobile">📱 Celular</option>
+        </select>
       </div>
     </header>
 
+    <!-- Menu extra (mobile + overflow) -->
+    <div id="moreMenu" class="more-menu" style="display:none;">
+      <button id="btnGitStatus" class="btn">Git Status</button>
+      <button id="btnGitPull" class="btn">Git Pull</button>
+      <button id="btnGitCommit" class="btn">Git Commit</button>
+      <button id="btnGitPush" class="btn">Git Push</button>
+      <button id="btnApiKeys" class="btn btn-keys">🔑 API Keys</button>
+      <button id="btnSecrets" class="btn btn-keys">🔒 Secrets</button>
+      <button id="btnMonitor" class="btn">📊 Monitor</button>
+      <button id="btnRestartApp" class="btn">↻ Restart App</button>
+      <button id="btnLogs" class="btn btn-logs">📋 Workflow Logs</button>
+      <button id="btnLogsAll" class="btn btn-logs">📦 All Logs</button>
+      <button id="btnStopLogs" class="btn btn-stop" style="display:none;">⏹ Parar Logs</button>
+    </div>
+
     <div class="main">
       <!-- Sidebar - File Explorer -->
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
           <span>Arquivos</span>
           <div class="sidebar-actions">
             <button id="btnNewFile" title="Novo arquivo">＋</button>
             <button id="btnNewFolder" title="Nova pasta">📁</button>
             <button id="btnRefresh" title="Atualizar">↻</button>
+            <button id="btnCloseSidebar" class="mobile-only" title="Fechar">✕</button>
           </div>
         </div>
         <div id="fileTree" class="file-tree"></div>
       </aside>
+      <div id="sidebarOverlay" class="sidebar-overlay mobile-only" style="display:none;"></div>
 
       <!-- Editor + Console -->
       <div class="editor-area">
