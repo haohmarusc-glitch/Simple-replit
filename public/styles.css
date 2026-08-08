@@ -1132,3 +1132,61 @@ body.mode-mobile #toastWrap { bottom: 24px; }
   color: #fff !important;
   border: none;
 }
+
+/* ===== EDITOR TABS ===== */
+.editor-tabs {
+  display: none;
+  flex-shrink: 0;
+  height: 36px;
+  background: #141414;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: 2px;
+  padding: 0 4px;
+  align-items: flex-end;
+}
+.editor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 160px;
+  height: 32px;
+  padding: 0 8px 0 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: #999;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.editor-tab:hover { background: #1f1f1f; color: #ddd; }
+.editor-tab.active {
+  background: #1a1a1a;
+  color: #e5e5e5;
+  border-color: var(--border);
+}
+.editor-tab.dirty .tab-name { color: #fbbf24; }
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-close {
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0.6;
+}
+.tab-close:hover { opacity: 1; background: #333; }
+
+body.mode-mobile .editor-tabs {
+  height: 40px;
+}
+body.mode-mobile .editor-tab {
+  height: 36px;
+  max-width: 120px;
+  min-height: 36px;
+}

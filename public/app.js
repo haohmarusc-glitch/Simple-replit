@@ -5,6 +5,8 @@ let currentLanguage = 'python';
 let files = [];
 let autoSaveTimer = null;
 let dirty = false;
+/** @type {{path:string, content:string, language:string, dirty:boolean}[]} */
+let openTabs = [];
 
 // ========== TOAST ==========
 function toast(msg, type = 'info') {
@@ -142,15 +144,118 @@ require(['vs/editor/editor.main'], function () {
   editor.onDidChangeModelContent(() => {
     if (!currentFile) return;
     dirty = true;
+    const tab = openTabs.find((t) => t.path === currentFile);
+    if (tab) {
+      tab.dirty = true;
+      tab.content = editor.getValue();
+    }
+    renderEditorTabs();
     clearTimeout(autoSaveTimer);
     autoSaveTimer = setTimeout(() => {
       if (dirty && currentFile) saveCurrentFile();
     }, 2000);
   });
 
+  window.addEventListener('beforeunload', (e) => {
+    if (openTabs.some((t) => t.dirty) || dirty) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
   // Carrega arquivos ao iniciar
   loadFiles();
 });
+
+// ========== TABS ==========
+function renderEditorTabs() {
+  const bar = document.getElementById('editorTabs');
+  if (!bar) return;
+  bar.innerHTML = '';
+  if (!openTabs.length) {
+    bar.style.display = 'none';
+    return;
+  }
+  bar.style.display = 'flex';
+  openTabs.forEach((tab) => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'editor-tab' + (tab.path === currentFile ? ' active' : '') + (tab.dirty ? ' dirty' : '');
+    const name = tab.path.split('/').pop();
+    el.innerHTML = `<span class="tab-name">${name}${tab.dirty ? ' •' : ''}</span><span class="tab-close" title="Fechar">×</span>`;
+    el.title = tab.path;
+    el.onclick = (e) => {
+      if (e.target.classList.contains('tab-close')) {
+        e.stopPropagation();
+        closeTab(tab.path);
+        return;
+      }
+      switchTab(tab.path);
+    };
+    bar.appendChild(el);
+  });
+}
+
+function syncCurrentTabFromEditor() {
+  if (!currentFile || !editor) return;
+  const tab = openTabs.find((t) => t.path === currentFile);
+  if (tab) {
+    tab.content = editor.getValue();
+    tab.language = currentLanguage;
+    tab.dirty = dirty;
+  }
+}
+
+function switchTab(path) {
+  if (path === currentFile) return;
+  syncCurrentTabFromEditor();
+  const tab = openTabs.find((t) => t.path === path);
+  if (!tab || !editor) return;
+  currentFile = tab.path;
+  currentLanguage = tab.language;
+  dirty = tab.dirty;
+  editor.setValue(tab.content);
+  monaco.editor.setModelLanguage(editor.getModel(), tab.language);
+  const select = document.getElementById('languageSelect');
+  if (select && [...select.options].some((o) => o.value === tab.language)) {
+    select.value = tab.language;
+  }
+  if (typeof updateBreadcrumb === 'function') updateBreadcrumb(path);
+  renderEditorTabs();
+  renderFileTree();
+}
+
+async function closeTab(path) {
+  const tab = openTabs.find((t) => t.path === path);
+  if (tab && tab.dirty) {
+    try {
+      if (path === currentFile) await saveCurrentFile();
+      else {
+        await apiFetch('/api/file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: tab.path, content: tab.content }),
+        });
+        tab.dirty = false;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  openTabs = openTabs.filter((t) => t.path !== path);
+  if (currentFile === path) {
+    if (openTabs.length) {
+      switchTab(openTabs[openTabs.length - 1].path);
+    } else {
+      currentFile = null;
+      dirty = false;
+      if (editor) editor.setValue('');
+      if (typeof updateBreadcrumb === 'function') updateBreadcrumb('');
+    }
+  }
+  renderEditorTabs();
+  renderFileTree();
+}
 
 // ========== LANGUAGE MAP ==========
 const langMap = {
@@ -263,9 +368,20 @@ async function openFile(filePath) {
       return;
     }
 
-    currentFile = filePath;
+    syncCurrentTabFromEditor();
     const lang = detectLanguage(filePath);
+    currentFile = filePath;
     currentLanguage = lang;
+    dirty = false;
+
+    const existing = openTabs.find((t) => t.path === filePath);
+    if (existing) {
+      existing.content = data.content;
+      existing.language = lang;
+      existing.dirty = false;
+    } else {
+      openTabs.push({ path: filePath, content: data.content, language: lang, dirty: false });
+    }
 
     editor.setValue(data.content);
     monaco.editor.setModelLanguage(editor.getModel(), lang);
@@ -281,6 +397,7 @@ async function openFile(filePath) {
       setMobileView('code');
     }
 
+    renderEditorTabs();
     renderFileTree();
   } catch (err) {
     toast('Erro ao abrir: ' + err.message, 'error');
@@ -306,8 +423,14 @@ async function saveCurrentFile() {
     const data = await res.json();
     if (data.success) {
       dirty = false;
+      const tab = openTabs.find((t) => t.path === currentFile);
+      if (tab) {
+        tab.dirty = false;
+        tab.content = content;
+      }
       toast('Salvo: ' + currentFile, 'ok');
       appendConsole('info', `✔ Salvo: ${currentFile}`);
+      renderEditorTabs();
       loadFiles();
     } else {
       toast('Erro ao salvar: ' + data.error, 'error');
@@ -482,9 +605,16 @@ async function deleteItem(filePath) {
     });
     const data = await res.json();
     if (data.success) {
+      openTabs = openTabs.filter((t) => t.path !== filePath);
       if (currentFile === filePath) {
-        currentFile = null;
-        editor.setValue('');
+        if (openTabs.length) {
+          switchTab(openTabs[openTabs.length - 1].path);
+        } else {
+          currentFile = null;
+          dirty = false;
+          editor.setValue('');
+        }
+        renderEditorTabs();
       }
       loadFiles();
     } else {
