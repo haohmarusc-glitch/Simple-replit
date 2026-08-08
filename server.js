@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { exec, spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +17,15 @@ const WORKSPACE = process.env.WORKSPACE_PATH
   : path.join(__dirname, 'workspace');
 
 const PUBLIC = path.join(__dirname, 'public');
+
+// Segurança (env)
+const AUTH_TOKEN = (process.env.AUTH_TOKEN || '').trim();
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+// SHELL_MODE=open permite qualquer comando (não recomendado). Default: whitelist
+const SHELL_OPEN = process.env.SHELL_MODE === 'open';
 
 // Pastas/arquivos que devem ser ignorados (para não explodir com monorepos grandes)
 const IGNORE = new Set([
@@ -53,15 +63,140 @@ if (!process.env.WORKSPACE_PATH && !fs.existsSync(WORKSPACE)) {
   fs.mkdirSync(WORKSPACE, { recursive: true });
 }
 
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+// ========== SECURITY MIDDLEWARE ==========
+// Helmet-like headers (sem dependência extra)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' data: https://cdnjs.cloudflare.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'"
+  );
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
+// CORS restrito
+app.use(
+  cors({
+    origin(origin, cb) {
+      // requests same-origin / curl / server-side sem Origin
+      if (!origin) return cb(null, true);
+      if (ALLOWED_ORIGINS.length === 0) {
+        // fallback: só mesmo host ou localhost
+        try {
+          const u = new URL(origin);
+          const ok =
+            u.hostname === 'localhost' ||
+            u.hostname === '127.0.0.1' ||
+            u.hostname === '65.108.154.111';
+          return cb(null, ok);
+        } catch {
+          return cb(null, false);
+        }
+      }
+      return cb(null, ALLOWED_ORIGINS.includes(origin));
+    },
+    credentials: true,
+  })
+);
+
+app.use(express.json({ limit: '2mb' }));
+
+// Rate limit simples em memória (por IP)
+const rateBuckets = new Map();
+function rateLimit(max, windowMs) {
+  return (req, res, next) => {
+    const ip = req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+    const key = ip + ':' + (req.route?.path || req.path);
+    const now = Date.now();
+    let b = rateBuckets.get(key);
+    if (!b || now > b.reset) {
+      b = { count: 0, reset: now + windowMs };
+      rateBuckets.set(key, b);
+    }
+    b.count += 1;
+    if (b.count > max) {
+      return res.status(429).json({ success: false, error: 'Muitas requisições. Aguarde um momento.' });
+    }
+    next();
+  };
+}
+
+// Limpa buckets periodicamente
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of rateBuckets) {
+    if (now > v.reset) rateBuckets.delete(k);
+  }
+}, 60_000).unref?.();
+
+function extractToken(req) {
+  const h = req.headers.authorization || '';
+  if (h.startsWith('Bearer ')) return h.slice(7).trim();
+  if (req.headers['x-auth-token']) return String(req.headers['x-auth-token']).trim();
+  if (req.query && req.query.token) return String(req.query.token).trim();
+  return '';
+}
+
+function requireAuth(req, res, next) {
+  if (!AUTH_TOKEN) return next(); // auth desligada se AUTH_TOKEN vazio
+  const token = extractToken(req);
+  let ok = false;
+  if (token && token.length === AUTH_TOKEN.length) {
+    try {
+      ok = crypto.timingSafeEqual(Buffer.from(token), Buffer.from(AUTH_TOKEN));
+    } catch {
+      ok = false;
+    }
+  }
+  if (!ok) {
+    return res.status(401).json({ success: false, error: 'Não autorizado. Informe AUTH_TOKEN.' });
+  }
+  next();
+}
+
+
+
+// Status de auth SEM exigir token (para a tela de login)
+app.get('/api/auth/status', (req, res) => {
+  res.json({ success: true, authRequired: !!AUTH_TOKEN });
+});
+
+// Auth em todas as outras /api/*
+app.use('/api', (req, res, next) => {
+  if (req.path === '/auth/status') return next();
+  return requireAuth(req, res, next);
+});
+app.use('/api', rateLimit(120, 60_000)); // 120 req/min por IP+rota
+
 app.use(express.static(PUBLIC));
 
 // ========== HELPERS ==========
 function getSafePath(userPath) {
-  const resolved = path.resolve(WORKSPACE, userPath || '');
-  if (!resolved.startsWith(WORKSPACE)) {
+  // Normaliza e bloqueia path traversal + symlink fora do workspace
+  const raw = String(userPath || '').replace(/\\/g, '/');
+  if (raw.includes('\0')) throw new Error('Caminho inválido');
+  const resolved = path.resolve(WORKSPACE, raw);
+  const root = path.resolve(WORKSPACE);
+  const rel = path.relative(root, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new Error('Caminho inválido (path traversal bloqueado)');
+  }
+  // Se existir, resolve symlink real e confere de novo
+  try {
+    if (fs.existsSync(resolved)) {
+      const real = fs.realpathSync(resolved);
+      const relReal = path.relative(root, real);
+      if (relReal.startsWith('..') || path.isAbsolute(relReal)) {
+        throw new Error('Caminho inválido (symlink fora do workspace)');
+      }
+      return real;
+    }
+  } catch (e) {
+    if (e.message.includes('inválido')) throw e;
   }
   return resolved;
 }
@@ -221,7 +356,7 @@ app.delete('/api/file', (req, res) => {
 });
 
 // ========== EXECUTAR CÓDIGO ==========
-app.post('/api/run', (req, res) => {
+app.post('/api/run', rateLimit(20, 60_000), (req, res) => {
   const { code, language, filename } = req.body;
 
   if (!code || !language) {
@@ -279,12 +414,33 @@ app.post('/api/run', (req, res) => {
 });
 
 // ========== SHELL ==========
-const BLOCKED_COMMANDS = [
-  'rm -rf /', 'rm -rf /*', 'mkfs', 'dd if=', ':(){', 'shutdown', 'reboot',
-  'passwd', 'userdel', 'chmod 777 /', 'chown -R'
+// Whitelist de binários permitidos (primeiro token do comando)
+const SHELL_WHITELIST = new Set([
+  'ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'echo', 'date', 'whoami', 'id',
+  'git', 'node', 'npm', 'npx', 'python', 'python3', 'pip', 'pip3',
+  'docker', 'pm2', 'curl', 'wget', 'df', 'du', 'free', 'ps', 'top', 'htop',
+  'find', 'grep', 'rg', 'sed', 'awk', 'sort', 'uniq', 'diff', 'tree',
+  'which', 'env', 'printenv', 'uname', 'uptime', 'ss', 'ip'
+]);
+
+const BLOCKED_PATTERNS = [
+  /rm\s+-rf\s+\/$/,
+  /rm\s+-rf\s+\/\s/,
+  /mkfs/,
+  /dd\s+if=/,
+  /:\(\)\s*\{/,
+  /\bshutdown\b/,
+  /\breboot\b/,
+  /\bpasswd\b/,
+  /\buserdel\b/,
+  /chmod\s+777\s+\//,
+  /chown\s+-R\s+.*\s+\//,
+  />\s*\/etc\//,
+  /curl\s+[^\n]*\|\s*(ba)?sh/,
+  /wget\s+[^\n]*\|\s*(ba)?sh/,
 ];
 
-app.post('/api/shell', (req, res) => {
+app.post('/api/shell', rateLimit(30, 60_000), (req, res) => {
   const { command } = req.body;
   if (!command || !command.trim()) {
     return res.status(400).json({ success: false, error: 'Comando vazio' });
@@ -292,13 +448,46 @@ app.post('/api/shell', (req, res) => {
 
   const cmd = command.trim();
 
-  for (const blocked of BLOCKED_COMMANDS) {
-    if (cmd.includes(blocked)) {
+  for (const re of BLOCKED_PATTERNS) {
+    if (re.test(cmd)) {
       return res.json({
         success: false,
         output: '',
-        error: `Comando bloqueado por segurança: contém "${blocked}"`
+        error: 'Comando bloqueado por segurança'
       });
+    }
+  }
+
+  if (!SHELL_OPEN) {
+    // Extrai primeiro comando (ignora env VAR=x no início simples)
+    const cleaned = cmd.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+/, '');
+    const first = cleaned.split(/[\s|;]+/)[0];
+    // permite paths tipo ./script.py só se extensão conhecida? — bloqueia paths
+    const base = path.basename(first);
+    if (!SHELL_WHITELIST.has(base) && !SHELL_WHITELIST.has(first)) {
+      return res.json({
+        success: false,
+        output: '',
+        error: `Comando não permitido: "${base}". Whitelist: ${[...SHELL_WHITELIST].slice(0, 20).join(', ')}… (SHELL_MODE=open para liberar)`
+      });
+    }
+    // Bloqueia shell chaining agressivo fora do modo open
+    if (/[;&`|]|\$\(|<\(/.test(cmd) && !cmd.startsWith('git ')) {
+      // permite pipes simples com comandos da whitelist
+      const parts = cmd.split(/\|/).map((p) => p.trim());
+      for (const part of parts) {
+        const b = path.basename(part.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+/, '').split(/\s+/)[0] || '');
+        if (!SHELL_WHITELIST.has(b)) {
+          return res.json({
+            success: false,
+            output: '',
+            error: `Pipe/comando não permitido: "${b}"`
+          });
+        }
+      }
+      if (/[;&`]|\$\(/.test(cmd)) {
+        return res.json({ success: false, output: '', error: 'Operadores ; & ` $() bloqueados no modo whitelist' });
+      }
     }
   }
 
@@ -306,7 +495,8 @@ app.post('/api/shell', (req, res) => {
     cwd: WORKSPACE,
     timeout: 30000,
     maxBuffer: 3 * 1024 * 1024,
-    shell: '/bin/bash'
+    shell: '/bin/bash',
+    env: { ...process.env, PATH: process.env.PATH }
   }, (error, stdout, stderr) => {
     res.json({
       success: !error,

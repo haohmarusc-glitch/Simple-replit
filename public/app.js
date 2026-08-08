@@ -4,6 +4,87 @@ let currentFile = null;
 let currentLanguage = 'python';
 let files = [];
 
+// ========== AUTH ==========
+const AUTH_KEY = 'sr_auth_token';
+function getAuthToken() {
+  return localStorage.getItem(AUTH_KEY) || '';
+}
+function setAuthToken(t) {
+  if (t) localStorage.setItem(AUTH_KEY, t);
+  else localStorage.removeItem(AUTH_KEY);
+}
+function authHeaders(extra = {}) {
+  const t = getAuthToken();
+  const h = { ...extra };
+  if (t) h['Authorization'] = 'Bearer ' + t;
+  return h;
+}
+async function apiFetch(url, opts = {}) {
+  const headers = authHeaders(opts.headers || {});
+  if (opts.body && !headers['Content-Type'] && !(opts.body instanceof FormData)) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(url, { ...opts, headers });
+  if (res.status === 401) {
+    showLoginGate('Sessão inválida. Digite o token novamente.');
+    throw new Error('Não autorizado');
+  }
+  return res;
+}
+function withTokenQuery(url) {
+  const t = getAuthToken();
+  if (!t) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return url + sep + 'token=' + encodeURIComponent(t);
+}
+
+function showLoginGate(msg) {
+  let gate = document.getElementById('authGate');
+  if (!gate) {
+    gate = document.createElement('div');
+    gate.id = 'authGate';
+    gate.innerHTML = `
+      <div class="auth-card">
+        <h2>Simple Replit</h2>
+        <p id="authMsg">Digite o token de acesso (AUTH_TOKEN)</p>
+        <input id="authInput" type="password" placeholder="Token" autocomplete="current-password" />
+        <button id="authSubmit" type="button">Entrar</button>
+      </div>`;
+    document.body.appendChild(gate);
+    document.getElementById('authSubmit').onclick = () => {
+      const v = document.getElementById('authInput').value.trim();
+      if (!v) return;
+      setAuthToken(v);
+      gate.style.display = 'none';
+      loadFiles();
+      fetch('/api/ai/status', { headers: authHeaders() }).then(r => r.json()).then(s => {
+        const el = document.getElementById('aiStatus');
+        if (el) el.textContent = s.ok ? 'AI ok' : '';
+      }).catch(() => {});
+    };
+    document.getElementById('authInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('authSubmit').click();
+    });
+  }
+  if (msg) {
+    const m = document.getElementById('authMsg');
+    if (m) m.textContent = msg;
+  }
+  gate.style.display = 'flex';
+}
+
+// Verifica se auth é necessária
+fetch('/api/auth/status')
+  .then((r) => r.json())
+  .then((s) => {
+    if (s.authRequired && !getAuthToken()) showLoginGate();
+    else if (s.authRequired && getAuthToken()) {
+      // valida token
+      apiFetch('/api/info').catch(() => {});
+    }
+  })
+  .catch(() => {});
+
 // ========== MONACO SETUP ==========
 require.config({
   paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }
@@ -58,7 +139,7 @@ function detectLanguage(filename) {
 // ========== FILE TREE ==========
 async function loadFiles() {
   try {
-    const res = await fetch('/api/files');
+    const res = await apiFetch('/api/files');
     const data = await res.json();
     if (data.success) {
       files = data.files;
@@ -131,7 +212,7 @@ function getFileIcon(name) {
 // ========== OPEN / SAVE ==========
 async function openFile(filePath) {
   try {
-    const res = await fetch(`/api/file?path=${encodeURIComponent(filePath)}`);
+    const res = await apiFetch(`/api/file?path=${encodeURIComponent(filePath)}`);
     const data = await res.json();
     if (!data.success) {
       alert('Erro: ' + data.error);
@@ -173,7 +254,7 @@ async function saveCurrentFile() {
   const content = editor.getValue();
 
   try {
-    const res = await fetch('/api/file', {
+    const res = await apiFetch('/api/file', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: currentFile, content })
@@ -196,7 +277,7 @@ document.getElementById('btnNewFile').onclick = async () => {
   if (!name) return;
 
   try {
-    const res = await fetch('/api/file', {
+    const res = await apiFetch('/api/file', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: name, content: '' })
@@ -218,7 +299,7 @@ document.getElementById('btnNewFolder').onclick = async () => {
   if (!name) return;
 
   try {
-    const res = await fetch('/api/folder', {
+    const res = await apiFetch('/api/folder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ path: name })
@@ -257,7 +338,7 @@ async function renameItem(oldPath, newName) {
   const newPath = parts.join('/');
 
   try {
-    const res = await fetch('/api/rename', {
+    const res = await apiFetch('/api/rename', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ oldPath, newPath })
@@ -276,7 +357,7 @@ async function renameItem(oldPath, newName) {
 
 async function deleteItem(filePath) {
   try {
-    const res = await fetch(`/api/file?path=${encodeURIComponent(filePath)}`, {
+    const res = await apiFetch(`/api/file?path=${encodeURIComponent(filePath)}`, {
       method: 'DELETE'
     });
     const data = await res.json();
@@ -308,7 +389,7 @@ async function runCode() {
   appendConsole('info', `▶ Executando (${language})...`);
 
   try {
-    const res = await fetch('/api/run', {
+    const res = await apiFetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -366,7 +447,7 @@ async function gitAction(endpoint, method = 'GET', body = null) {
       opts.headers = { 'Content-Type': 'application/json' };
       opts.body = JSON.stringify(body);
     }
-    const res = await fetch(endpoint, opts);
+    const res = await apiFetch(endpoint, opts);
     const data = await res.json();
 
     if (data.output) appendConsole('stdout', data.output);
@@ -432,7 +513,7 @@ async function runShellCommand(cmd) {
   if (!cmd.trim()) return;
   appendConsole('info', `$ ${cmd}`);
   try {
-    const res = await fetch('/api/shell', {
+    const res = await apiFetch('/api/shell', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: cmd })
@@ -480,7 +561,7 @@ document.getElementById('btnDeploy').onclick = () => {
 
   appendConsole('info', '── Deploy iniciado (log ao vivo) ──');
 
-  const es = new EventSource('/api/deploy/stream');
+  const es = new EventSource(withTokenQuery('/api/deploy/stream'));
 
   es.onmessage = (event) => {
     try {
@@ -514,7 +595,7 @@ function stopLogStream() {
     logEventSource.close();
     logEventSource = null;
   }
-  fetch('/api/logs/stop', { method: 'POST' }).catch(() => {});
+  apiFetch('/api/logs/stop', { method: 'POST' }).catch(() => {});
   document.getElementById('btnLogs').style.display = '';
   document.getElementById('btnLogsAll').style.display = '';
   document.getElementById('btnStopLogs').style.display = 'none';
@@ -537,7 +618,7 @@ function startLogStream(mode) {
 
   appendConsole('info', `── Conectando logs ao vivo (${mode})... ──`);
 
-  logEventSource = new EventSource(`/api/logs/stream?mode=${mode}`);
+  logEventSource = new EventSource(withTokenQuery(`/api/logs/stream?mode=${mode}`));
 
   logEventSource.onmessage = (event) => {
     try {
@@ -565,7 +646,7 @@ document.getElementById('btnLogsAll').onclick = () => startLogStream('all');
 document.getElementById('btnMonitor').onclick = async () => {
   appendConsole('info', '── Monitor ──');
   try {
-    const res = await fetch('/api/monitor');
+    const res = await apiFetch('/api/monitor');
     const data = await res.json();
     if (data.uptime) appendConsole('stdout', 'Uptime: ' + data.uptime);
     if (data.memory) appendConsole('stdout', data.memory);
@@ -591,7 +672,7 @@ document.getElementById('btnMonitor').onclick = async () => {
 document.getElementById('btnSecrets').onclick = async () => {
   appendConsole('info', '── Secrets (.env) ──');
   try {
-    const res = await fetch('/api/secrets');
+    const res = await apiFetch('/api/secrets');
     const data = await res.json();
     if (!data.success) {
       appendConsole('stderr', data.error || 'Falha');
@@ -612,7 +693,7 @@ document.getElementById('btnRestartApp').onclick = async () => {
   if (!confirm('Reiniciar o container do app (docker compose restart app)?')) return;
   appendConsole('info', '── Restart app ──');
   try {
-    const res = await fetch('/api/workflow', {
+    const res = await apiFetch('/api/workflow', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'restart-app' })
@@ -643,7 +724,7 @@ function addAiMessage(role, content, files) {
       btn.textContent = `💾 Salvar ${f.path}`;
       btn.onclick = async () => {
         try {
-          const res = await fetch('/api/file', {
+          const res = await apiFetch('/api/file', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: f.path, content: f.content })
@@ -688,7 +769,7 @@ async function sendAiMessage(presetText) {
   aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
 
   try {
-    const res = await fetch('/api/ai/chat', {
+    const res = await apiFetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

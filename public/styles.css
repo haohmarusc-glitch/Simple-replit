@@ -920,3 +920,46 @@ body.mode-desktop .console-panel {
 ::-webkit-scrollbar-thumb:hover {
   background: #444;
 }
+
+/* ===== AUTH GATE ===== */
+#authGate {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.85);
+  padding: 16px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 360px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 24px;
+}
+.auth-card h2 { margin: 0 0 8px; font-size: 20px; }
+.auth-card p { margin: 0 0 16px; color: #999; font-size: 14px; }
+.auth-card input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: #111;
+  color: #fff;
+  font-size: 16px;
+}
+.auth-card button {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 8px;
+  background: #3b82f6;
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+}
