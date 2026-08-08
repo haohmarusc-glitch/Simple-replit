@@ -29,6 +29,14 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(PUBLIC, 'index.html'));
 });
 
+// Error handler global
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('[error]', err && err.stack ? err.stack : err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ success: false, error: err.message || 'Erro interno' });
+});
+
 app.listen(PORT, () => {
   console.log(`Simple Replit em http://localhost:${PORT}`);
   console.log(`Workspace: ${require('./src/config').WORKSPACE}`);

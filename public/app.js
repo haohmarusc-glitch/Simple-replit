@@ -1399,5 +1399,13 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     openFilePalette();
   }
-  if (e.key === 'Escape') closeFilePalette();
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
+    e.preventDefault();
+    if (currentFile) closeTab(currentFile);
+  }
+  if (e.key === 'Escape') {
+    closeFilePalette();
+    if (typeof hideCtxMenu === 'function') hideCtxMenu();
+    if (typeof closeSheet === 'function') closeSheet();
+  }
 });
