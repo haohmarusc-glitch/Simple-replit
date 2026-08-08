@@ -642,6 +642,149 @@ app.post('/api/workflow', (req, res) => {
   });
 });
 
+// ========== AI CHAT (Groq + DeepSeek) ==========
+function loadEnvKeys() {
+  const keys = {
+    DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY || '',
+    GROQ_API_KEY: process.env.GROQ_API_KEY || ''
+  };
+  try {
+    const envPath = path.join(WORKSPACE, '.env');
+    if (fs.existsSync(envPath)) {
+      const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) continue;
+        const eq = t.indexOf('=');
+        if (eq === -1) continue;
+        const k = t.slice(0, eq).trim();
+        let v = t.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+        if (k === 'DEEPSEEK_API_KEY' && v) keys.DEEPSEEK_API_KEY = v;
+        if (k === 'GROQ_API_KEY' && v) keys.GROQ_API_KEY = v;
+      }
+    }
+  } catch (e) {}
+  return keys;
+}
+
+const AI_MODELS = {
+  'groq-fast': {
+    provider: 'groq',
+    model: 'llama-3.1-8b-instant',
+    url: 'https://api.groq.com/openai/v1/chat/completions'
+  },
+  'groq-quality': {
+    provider: 'groq',
+    model: 'openai/gpt-oss-120b',
+    url: 'https://api.groq.com/openai/v1/chat/completions'
+  },
+  'deepseek-flash': {
+    provider: 'deepseek',
+    model: 'deepseek-chat',
+    url: 'https://api.deepseek.com/chat/completions'
+  },
+  'deepseek-pro': {
+    provider: 'deepseek',
+    model: 'deepseek-reasoner',
+    url: 'https://api.deepseek.com/chat/completions'
+  }
+};
+
+const AI_SYSTEM = `Você é um assistente de programação no Simple Replit (IDE na VPS).
+Responda em português. Seja direto e útil.
+
+Quando for criar ou editar arquivos, use EXATAMENTE este formato (pode repetir para vários arquivos):
+
+\`\`\`file:caminho/do/arquivo.ext
+conteúdo completo do arquivo aqui
+\`\`\`
+
+Regras:
+- Prefira arquivos completos prontos para salvar
+- Não invente secrets; use variáveis de ambiente
+- Para apps web simples, use HTML/CSS/JS ou Python
+- Se o usuário pedir só explicação, não use o bloco file:`;
+
+app.get('/api/ai/status', (req, res) => {
+  const keys = loadEnvKeys();
+  res.json({
+    groq: !!keys.GROQ_API_KEY,
+    deepseek: !!keys.DEEPSEEK_API_KEY,
+    models: Object.keys(AI_MODELS)
+  });
+});
+
+app.post('/api/ai/chat', async (req, res) => {
+  try {
+    const { messages, model: modelKey, currentFile, currentCode } = req.body || {};
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ success: false, error: 'messages obrigatório' });
+    }
+
+    const key = modelKey && AI_MODELS[modelKey] ? modelKey : 'groq-fast';
+    const cfg = AI_MODELS[key];
+    const keys = loadEnvKeys();
+    const apiKey = cfg.provider === 'groq' ? keys.GROQ_API_KEY : keys.DEEPSEEK_API_KEY;
+
+    if (!apiKey) {
+      return res.status(400).json({
+        success: false,
+        error: cfg.provider === 'groq'
+          ? 'GROQ_API_KEY não configurada no .env'
+          : 'DEEPSEEK_API_KEY não configurada no .env'
+      });
+    }
+
+    const systemContent = AI_SYSTEM +
+      (currentFile ? `\n\nArquivo aberto agora: ${currentFile}` : '') +
+      (currentCode ? `\n\nConteúdo atual do editor (trecho):\n\`\`\`\n${String(currentCode).slice(0, 8000)}\n\`\`\`` : '');
+
+    const payload = {
+      model: cfg.model,
+      messages: [
+        { role: 'system', content: systemContent },
+        ...messages.map(m => ({ role: m.role, content: m.content }))
+      ],
+      temperature: 0.3,
+      max_tokens: 4096
+    };
+
+    const r = await fetch(cfg.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const errMsg = data.error?.message || data.message || JSON.stringify(data).slice(0, 300);
+      return res.status(r.status).json({ success: false, error: errMsg });
+    }
+
+    const content = data.choices?.[0]?.message?.content || '';
+    // Extrai blocos file:
+    const files = [];
+    const re = /```file:([^\n]+)\n([\s\S]*?)```/g;
+    let match;
+    while ((match = re.exec(content)) !== null) {
+      files.push({ path: match[1].trim(), content: match[2].replace(/\n$/, '') });
+    }
+
+    res.json({
+      success: true,
+      content,
+      files,
+      model: key,
+      usage: data.usage || null
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Fallback SPA
 app.get('*', (req, res) => {
   res.sendFile(path.join(PUBLIC, 'index.html'));

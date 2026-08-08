@@ -402,17 +402,24 @@ document.getElementById('btnGitCommit').onclick = () => {
   gitAction('/api/git/commit', 'POST', { message });
 };
 
-// ========== SHELL ==========
+// ========== SHELL + TABS ==========
 const shellInput = document.getElementById('shellInput');
 const shellInputArea = document.getElementById('shellInputArea');
+const aiChatArea = document.getElementById('aiChatArea');
+const aiModelWrap = document.getElementById('aiModelWrap');
+const consoleOutputEl = document.getElementById('consoleOutput');
 
 document.querySelectorAll('.console-tabs .tab').forEach(tab => {
   tab.onclick = () => {
     document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.remove('active'));
     tab.classList.add('active');
-    const isShell = tab.dataset.tab === 'shell';
-    shellInputArea.style.display = isShell ? 'flex' : 'none';
-    if (isShell) shellInput.focus();
+    const name = tab.dataset.tab;
+    shellInputArea.style.display = name === 'shell' ? 'flex' : 'none';
+    aiChatArea.style.display = name === 'ai' ? 'flex' : 'none';
+    consoleOutputEl.style.display = (name === 'console' || name === 'shell') ? 'block' : 'none';
+    aiModelWrap.style.display = name === 'ai' ? 'block' : 'none';
+    if (name === 'shell') shellInput.focus();
+    if (name === 'ai') document.getElementById('aiInput').focus();
   };
 });
 
@@ -613,3 +620,100 @@ document.getElementById('btnRestartApp').onclick = async () => {
     appendConsole('stderr', 'Erro: ' + err.message);
   }
 };
+
+// ========== AI CHAT ==========
+const aiMessages = [];
+const aiMessagesEl = document.getElementById('aiMessages');
+const aiInput = document.getElementById('aiInput');
+
+function addAiMessage(role, content, files) {
+  const div = document.createElement('div');
+  div.className = `ai-msg ${role}`;
+  div.textContent = content;
+  if (files && files.length) {
+    const actions = document.createElement('div');
+    actions.className = 'file-actions';
+    files.forEach(f => {
+      const btn = document.createElement('button');
+      btn.textContent = `💾 Salvar ${f.path}`;
+      btn.onclick = async () => {
+        try {
+          const res = await fetch('/api/file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: f.path, content: f.content })
+          });
+          const data = await res.json();
+          if (data.success) {
+            btn.textContent = `✔ ${f.path}`;
+            btn.style.background = '#14532d';
+            loadFiles();
+            if (currentFile === f.path && editor) editor.setValue(f.content);
+          } else {
+            alert(data.error || 'Erro ao salvar');
+          }
+        } catch (e) {
+          alert(e.message);
+        }
+      };
+      actions.appendChild(btn);
+    });
+    div.appendChild(actions);
+  }
+  aiMessagesEl.appendChild(div);
+  aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
+}
+
+async function sendAiMessage() {
+  const text = aiInput.value.trim();
+  if (!text) return;
+  aiInput.value = '';
+  aiMessages.push({ role: 'user', content: text });
+  addAiMessage('user', text);
+
+  const thinking = document.createElement('div');
+  thinking.className = 'ai-msg assistant';
+  thinking.textContent = 'Pensando...';
+  thinking.id = 'aiThinking';
+  aiMessagesEl.appendChild(thinking);
+  aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
+
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages: aiMessages.slice(-12),
+        model: document.getElementById('aiModel').value,
+        currentFile: currentFile,
+        currentCode: editor ? editor.getValue() : ''
+      })
+    });
+    const data = await res.json();
+    document.getElementById('aiThinking')?.remove();
+    if (!data.success) {
+      addAiMessage('assistant', 'Erro: ' + (data.error || 'falha'));
+      return;
+    }
+    aiMessages.push({ role: 'assistant', content: data.content });
+    addAiMessage('assistant', data.content, data.files || []);
+  } catch (err) {
+    document.getElementById('aiThinking')?.remove();
+    addAiMessage('assistant', 'Erro de conexão: ' + err.message);
+  }
+}
+
+document.getElementById('btnAiSend').onclick = sendAiMessage;
+aiInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendAiMessage();
+  }
+});
+
+// Status das keys no load
+fetch('/api/ai/status').then(r => r.json()).then(s => {
+  if (!s.groq && !s.deepseek) {
+    console.warn('Nenhuma API key de IA configurada (GROQ_API_KEY / DEEPSEEK_API_KEY)');
+  }
+}).catch(() => {});
