@@ -14,6 +14,10 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .filter(Boolean);
 const SHELL_OPEN = process.env.SHELL_MODE === 'open';
 
+const BACKUP_DIR = process.env.BACKUP_PATH
+  ? path.resolve(process.env.BACKUP_PATH)
+  : path.join(__dirname, '..', 'backups');
+
 const IGNORE = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', '.cache', 'coverage',
   '__pycache__', '.temp', '.DS_Store', 'pnpm-lock.yaml', 'package-lock.json',
@@ -28,6 +32,10 @@ if (!process.env.WORKSPACE_PATH && !fs.existsSync(WORKSPACE)) {
   fs.mkdirSync(WORKSPACE, { recursive: true });
 }
 
+if (!fs.existsSync(BACKUP_DIR)) {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
+
 module.exports = {
   WORKSPACE,
   PUBLIC,
@@ -35,6 +43,7 @@ module.exports = {
   AUTH_TOKEN,
   ALLOWED_ORIGINS,
   SHELL_OPEN,
+  BACKUP_DIR,
   IGNORE,
   ALLOWED_DOTFILES,
 };

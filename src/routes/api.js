@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { exec, spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
-const { WORKSPACE, AUTH_TOKEN, SHELL_OPEN } = require('../config');
+const { WORKSPACE, AUTH_TOKEN, SHELL_OPEN, BACKUP_DIR } = require('../config');
 const { getSafePath, listFiles, runGit, loadEnvKeys } = require('../helpers');
 const { rateLimit } = require('../middleware');
 
@@ -332,6 +332,157 @@ app.get('/api/deploy/stream', (req, res) => {
   }
 
   runStep();
+});
+
+// ========== BACKUP / RESTORE ==========
+const BACKUP_EXCLUDE = [
+  'node_modules', '.git', '.next', 'dist', 'build', '.cache', 'coverage',
+  '__pycache__', '.temp', 'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock'
+];
+
+function backupFileName(label) {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const safe = (label || 'manual').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'manual';
+  return `backup-${ts}-${safe}.tar.gz`;
+}
+
+function runTar(args, timeoutMs = 120000) {
+  return new Promise((resolve) => {
+    const child = spawn('tar', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch (_) {}
+      resolve({ ok: false, error: 'Timeout ao executar tar' });
+    }, timeoutMs);
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ ok: false, error: err.message });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve({ ok: true });
+      else resolve({ ok: false, error: (stderr || `tar saiu com código ${code}`).trim() });
+    });
+  });
+}
+
+function makeWorkspaceBackup(label) {
+  const name = backupFileName(label);
+  const outPath = path.join(BACKUP_DIR, name);
+  if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const parent = path.dirname(WORKSPACE);
+  const base = path.basename(WORKSPACE);
+  const excludeArgs = BACKUP_EXCLUDE.flatMap((d) => ['--exclude', d]);
+  const args = ['-czf', outPath, ...excludeArgs, '-C', parent, base];
+  return runTar(args, 120000).then((r) => {
+    if (!r.ok) return { success: false, error: r.error };
+    let size = 0;
+    try { size = fs.statSync(outPath).size; } catch (_) {}
+    return {
+      success: true,
+      name,
+      path: outPath,
+      size,
+      sizeHuman: (size / (1024 * 1024)).toFixed(2) + ' MB',
+    };
+  });
+}
+
+app.get('/api/backups', (req, res) => {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) {
+      return res.json({ success: true, backups: [], dir: BACKUP_DIR });
+    }
+    const files = fs.readdirSync(BACKUP_DIR)
+      .filter((f) => f.endsWith('.tar.gz') && f.startsWith('backup-'))
+      .map((f) => {
+        const full = path.join(BACKUP_DIR, f);
+        const st = fs.statSync(full);
+        return {
+          name: f,
+          size: st.size,
+          sizeHuman: (st.size / (1024 * 1024)).toFixed(2) + ' MB',
+          mtime: st.mtime.toISOString(),
+          mtimeLocal: st.mtime.toLocaleString('pt-BR'),
+        };
+      })
+      .sort((a, b) => (a.mtime < b.mtime ? 1 : -1));
+    res.json({ success: true, backups: files, dir: BACKUP_DIR });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/backup', rateLimit(5, 60_000), async (req, res) => {
+  try {
+    const label = (req.body && req.body.label) || 'manual';
+    const result = await makeWorkspaceBackup(label);
+    if (!result.success) {
+      return res.status(500).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/restore', rateLimit(3, 120_000), async (req, res) => {
+  try {
+    const { name, makeSafetyBackup } = req.body || {};
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ success: false, error: 'name do backup obrigatório' });
+    }
+    if (name.includes('..') || name.includes('/') || name.includes('\\') || !name.endsWith('.tar.gz')) {
+      return res.status(400).json({ success: false, error: 'Nome de backup inválido' });
+    }
+    const archive = path.join(BACKUP_DIR, name);
+    if (!fs.existsSync(archive)) {
+      return res.status(404).json({ success: false, error: 'Backup não encontrado' });
+    }
+
+    let safety = null;
+    if (makeSafetyBackup !== false) {
+      safety = await makeWorkspaceBackup('pre-restore');
+      if (!safety.success) {
+        console.error('[restore] safety backup failed:', safety.error);
+      }
+    }
+
+    const parent = path.dirname(WORKSPACE);
+    const r = await runTar(['-xzf', archive, '-C', parent], 180000);
+    if (!r.ok) {
+      return res.status(500).json({ success: false, error: r.error || 'Falha ao restaurar' });
+    }
+    res.json({
+      success: true,
+      message: `Restaurado a partir de ${name}`,
+      workspace: WORKSPACE,
+      safetyBackup: safety && safety.success ? safety.name : null,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/backup', rateLimit(10, 60_000), (req, res) => {
+  try {
+    const name = req.query.name || (req.body && req.body.name);
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ success: false, error: 'name obrigatório' });
+    }
+    if (name.includes('..') || name.includes('/') || name.includes('\\') || !name.endsWith('.tar.gz')) {
+      return res.status(400).json({ success: false, error: 'Nome inválido' });
+    }
+    const full = path.join(BACKUP_DIR, name);
+    if (!fs.existsSync(full)) {
+      return res.status(404).json({ success: false, error: 'Backup não encontrado' });
+    }
+    fs.unlinkSync(full);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // ========== LOGS AO VIVO (SSE) ==========

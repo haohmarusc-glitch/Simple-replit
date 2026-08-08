@@ -759,54 +759,210 @@ document.getElementById('btnGitCommit').onclick = async () => {
   gitAction('/api/git/commit', 'POST', { message });
 };
 
-// ========== SHELL + TABS ==========
-const shellInput = document.getElementById('shellInput');
-const shellInputArea = document.getElementById('shellInputArea');
+// ========== SHELL (xterm) + TABS ==========
 const aiChatArea = document.getElementById('aiChatArea');
 const aiModelWrap = document.getElementById('aiModelWrap');
 const consoleOutputEl = document.getElementById('consoleOutput');
+const xtermContainer = document.getElementById('xtermContainer');
+const consolePanel = document.querySelector('.console-panel');
 
-document.querySelectorAll('.console-tabs .tab').forEach(tab => {
-  tab.onclick = () => {
-    document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    const name = tab.dataset.tab;
-    shellInputArea.style.display = name === 'shell' ? 'flex' : 'none';
-    aiChatArea.style.display = name === 'ai' ? 'flex' : 'none';
-    consoleOutputEl.style.display = (name === 'console' || name === 'shell') ? 'block' : 'none';
-    aiModelWrap.style.display = name === 'ai' ? 'block' : 'none';
-    if (name === 'shell') shellInput.focus();
-    if (name === 'ai') document.getElementById('aiInput').focus();
-  };
-});
+let term = null;
+let fitAddon = null;
+let shellHistory = [];
+let historyIndex = -1;
+let currentLine = '';
+let shellBusy = false;
 
-async function runShellCommand(cmd) {
-  if (!cmd.trim()) return;
-  appendConsole('info', `$ ${cmd}`);
+function writePrompt() {
+  if (!term) return;
+  term.write('\x1b[32m$\x1b[0m ');
+}
+
+function initTerminal() {
+  if (term || typeof Terminal === 'undefined') return;
+  term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
+    theme: {
+      background: '#111111',
+      foreground: '#d4d4d4',
+      cursor: '#58a6ff',
+      selectionBackground: '#264f78',
+      black: '#111',
+      red: '#f85149',
+      green: '#3fb950',
+      yellow: '#d29922',
+      blue: '#58a6ff',
+      magenta: '#bc8cff',
+      cyan: '#39c5cf',
+      white: '#d4d4d4',
+    },
+    convertEol: true,
+    scrollback: 2000,
+  });
+  if (typeof FitAddon !== 'undefined') {
+    fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+  }
+  term.open(xtermContainer);
+  if (fitAddon) fitAddon.fit();
+
+  term.writeln('\x1b[1;32mSimple Replit Shell\x1b[0m');
+  term.writeln('\x1b[90mEnter = executar · ↑/↓ = histórico · Ctrl+L = limpar\x1b[0m');
+  term.writeln('');
+  writePrompt();
+
+  term.onData((data) => {
+    if (shellBusy) return;
+    const code = data.charCodeAt(0);
+
+    // Enter
+    if (data === '\r' || data === '\n') {
+      term.write('\r\n');
+      const cmd = currentLine;
+      currentLine = '';
+      if (cmd.trim()) {
+        shellHistory.push(cmd);
+        if (shellHistory.length > 100) shellHistory.shift();
+      }
+      historyIndex = shellHistory.length;
+      runShellInTerm(cmd);
+      return;
+    }
+
+    // Backspace
+    if (data === '\x7f' || data === '\b') {
+      if (currentLine.length > 0) {
+        currentLine = currentLine.slice(0, -1);
+        term.write('\b \b');
+      }
+      return;
+    }
+
+    // Ctrl+C
+    if (code === 3) {
+      term.write('^C\r\n');
+      currentLine = '';
+      writePrompt();
+      return;
+    }
+
+    // Ctrl+L clear
+    if (code === 12) {
+      term.clear();
+      currentLine = '';
+      writePrompt();
+      return;
+    }
+
+    // Arrow Up
+    if (data === '\x1b[A') {
+      if (shellHistory.length === 0) return;
+      historyIndex = Math.max(0, historyIndex - 1);
+      replaceCurrentLine(shellHistory[historyIndex] || '');
+      return;
+    }
+
+    // Arrow Down
+    if (data === '\x1b[B') {
+      if (shellHistory.length === 0) return;
+      historyIndex = Math.min(shellHistory.length, historyIndex + 1);
+      replaceCurrentLine(historyIndex >= shellHistory.length ? '' : shellHistory[historyIndex]);
+      return;
+    }
+
+    // Ignore other escape sequences
+    if (data.startsWith('\x1b')) return;
+
+    // Printable
+    if (code >= 32) {
+      currentLine += data;
+      term.write(data);
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    if (fitAddon && xtermContainer && xtermContainer.style.display !== 'none') {
+      try { fitAddon.fit(); } catch (_) {}
+    }
+  });
+}
+
+function replaceCurrentLine(text) {
+  // erase current line visually
+  for (let i = 0; i < currentLine.length; i++) term.write('\b \b');
+  currentLine = text || '';
+  term.write(currentLine);
+}
+
+async function runShellInTerm(cmd) {
+  if (!cmd.trim()) {
+    writePrompt();
+    return;
+  }
+  shellBusy = true;
   try {
     const res = await apiFetch('/api/shell', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: cmd })
+      body: JSON.stringify({ command: cmd }),
     });
     const data = await res.json();
-    if (data.output) appendConsole('stdout', data.output);
-    if (data.error) appendConsole('stderr', data.error);
+    if (data.output) term.writeln(data.output);
+    if (data.error) term.writeln('\x1b[31m' + data.error + '\x1b[0m');
     if (data.success && !data.output && !data.error) {
-      appendConsole('info', '(sem saída)');
+      term.writeln('\x1b[90m(sem saída)\x1b[0m');
     }
   } catch (err) {
-    appendConsole('stderr', 'Erro de conexão: ' + err.message);
+    term.writeln('\x1b[31mErro de conexão: ' + err.message + '\x1b[0m');
   }
+  shellBusy = false;
+  writePrompt();
 }
 
-shellInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    const cmd = shellInput.value;
-    shellInput.value = '';
-    runShellCommand(cmd);
+function showConsoleTab(name) {
+  document.querySelectorAll('.console-tabs .tab').forEach((t) => t.classList.remove('active'));
+  const tabBtn = document.querySelector(`.console-tabs .tab[data-tab="${name}"]`);
+  if (tabBtn) tabBtn.classList.add('active');
+
+  const isShell = name === 'shell';
+  const isAi = name === 'ai';
+  const isConsole = name === 'console';
+
+  consoleOutputEl.style.display = isConsole ? 'block' : 'none';
+  xtermContainer.style.display = isShell ? 'block' : 'none';
+  aiChatArea.style.display = isAi ? 'flex' : 'none';
+  aiModelWrap.style.display = isAi ? 'block' : 'none';
+  if (consolePanel) consolePanel.classList.toggle('shell-active', isShell);
+
+  if (isShell) {
+    initTerminal();
+    setTimeout(() => {
+      if (fitAddon) try { fitAddon.fit(); } catch (_) {}
+      if (term) term.focus();
+    }, 50);
   }
+  if (isAi) document.getElementById('aiInput')?.focus();
+}
+
+document.querySelectorAll('.console-tabs .tab').forEach((tab) => {
+  tab.onclick = () => showConsoleTab(tab.dataset.tab);
 });
+
+// clear also clears xterm when on shell
+const _origClear = document.getElementById('btnClearConsole').onclick;
+document.getElementById('btnClearConsole').onclick = () => {
+  document.getElementById('consoleOutput').innerHTML = '';
+  if (term && xtermContainer.style.display !== 'none') {
+    term.clear();
+    currentLine = '';
+    writePrompt();
+  }
+  if (typeof _origClear === 'function') {
+    /* already cleared above */
+  }
+};
 
 // ========== API KEYS (.env) ==========
 document.getElementById('btnApiKeys').onclick = () => {
@@ -815,20 +971,52 @@ document.getElementById('btnApiKeys').onclick = () => {
   appendConsole('info', 'Depois use 🚀 Deploy ou no Shell: docker compose restart app');
 };
 
-// ========== DEPLOY (com log ao vivo) ==========
-document.getElementById('btnDeploy').onclick = () => {
-  if (!confirm('Deploy agora?\n\n1. git pull\n2. docker compose up -d --build\n3. status\n\nO log aparece ao vivo no console.')) {
-    return;
+// ========== DEPLOY (com log ao vivo + backup opcional) ==========
+document.getElementById('btnDeploy').onclick = async () => {
+  // OK = com backup · Cancelar = pergunta se quer sem backup
+  let withBackup = confirm(
+    'Deploy agora?\n\n1. Backup automático\n2. git pull\n3. docker compose up -d --build\n4. status\n\nOK = Deploy COM backup\nCancelar = outras opções'
+  );
+  if (!withBackup) {
+    const sem = confirm('Fazer deploy SEM backup?');
+    if (!sem) return;
   }
 
-  document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.remove('active'));
-  const consoleTab = document.querySelector('.console-tabs .tab[data-tab="console"]');
-  if (consoleTab) consoleTab.classList.add('active');
-  if (typeof shellInputArea !== 'undefined') shellInputArea.style.display = 'none';
+  showConsoleTab('console');
 
   const btn = document.getElementById('btnDeploy');
   btn.disabled = true;
   btn.textContent = '🚀 Deploying...';
+
+  if (withBackup) {
+    appendConsole('info', '── Backup pré-deploy ──');
+    try {
+      const res = await apiFetch('/api/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'pre-deploy' }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        appendConsole('info', `✔ Backup: ${data.name} (${data.sizeHuman})`);
+        toast('Backup salvo: ' + data.name, 'success');
+      } else {
+        appendConsole('stderr', 'Backup falhou: ' + (data.error || ''));
+        if (!confirm('Backup falhou. Continuar o deploy mesmo assim?')) {
+          btn.disabled = false;
+          btn.textContent = '🚀 Deploy';
+          return;
+        }
+      }
+    } catch (err) {
+      appendConsole('stderr', 'Erro no backup: ' + err.message);
+      if (!confirm('Backup falhou. Continuar o deploy mesmo assim?')) {
+        btn.disabled = false;
+        btn.textContent = '🚀 Deploy';
+        return;
+      }
+    }
+  }
 
   appendConsole('info', '── Deploy iniciado (log ao vivo) ──');
 
@@ -858,6 +1046,149 @@ document.getElementById('btnDeploy').onclick = () => {
   };
 };
 
+// ========== BACKUP / RESTORE ==========
+document.getElementById('btnBackup').onclick = async () => {
+  showConsoleTab('console');
+  appendConsole('info', '── Criando backup do workspace ──');
+  toast('Criando backup...', 'info');
+  try {
+    const res = await apiFetch('/api/backup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: 'manual' }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      appendConsole('info', `✔ Backup salvo: ${data.name} (${data.sizeHuman})`);
+      toast('Backup salvo: ' + data.name, 'success');
+    } else {
+      appendConsole('stderr', data.error || 'Falha no backup');
+      toast(data.error || 'Falha no backup', 'error');
+    }
+  } catch (err) {
+    appendConsole('stderr', 'Erro: ' + err.message);
+    toast('Erro no backup', 'error');
+  }
+};
+
+function closeBackupModal() {
+  const m = document.getElementById('backupModal');
+  if (m) m.remove();
+}
+
+async function openRestoreModal() {
+  closeBackupModal();
+  showConsoleTab('console');
+  appendConsole('info', '── Carregando lista de backups ──');
+
+  let backups = [];
+  try {
+    const res = await apiFetch('/api/backups');
+    const data = await res.json();
+    if (!data.success) {
+      appendConsole('stderr', data.error || 'Erro ao listar backups');
+      return;
+    }
+    backups = data.backups || [];
+  } catch (err) {
+    appendConsole('stderr', 'Erro: ' + err.message);
+    return;
+  }
+
+  const modal = document.createElement('div');
+  modal.id = 'backupModal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-box backup-modal">
+      <h3>♻ Restaurar Backup</h3>
+      <p class="modal-hint">Antes de restaurar, um backup de segurança (pre-restore) é criado automaticamente.</p>
+      <div class="backup-list" id="backupList"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="backupModalClose">Fechar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const list = document.getElementById('backupList');
+  if (!backups.length) {
+    list.innerHTML = '<div class="backup-empty">Nenhum backup encontrado.</div>';
+  } else {
+    backups.forEach((b) => {
+      const row = document.createElement('div');
+      row.className = 'backup-row';
+      row.innerHTML = `
+        <div class="backup-info">
+          <div class="backup-name">${b.name}</div>
+          <div class="backup-meta">${b.mtimeLocal} · ${b.sizeHuman}</div>
+        </div>
+        <div class="backup-actions">
+          <button type="button" class="btn btn-primary btn-restore-one" data-name="${b.name}">Restaurar</button>
+          <button type="button" class="btn btn-danger btn-del-one" data-name="${b.name}" title="Apagar">🗑</button>
+        </div>`;
+      list.appendChild(row);
+    });
+  }
+
+  document.getElementById('backupModalClose').onclick = closeBackupModal;
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeBackupModal(); });
+
+  list.querySelectorAll('.btn-restore-one').forEach((btn) => {
+    btn.onclick = async () => {
+      const name = btn.dataset.name;
+      if (!confirm(`Restaurar o workspace a partir de:\n\n${name}\n\nUm backup de segurança será criado antes.\nContinuar?`)) return;
+      btn.disabled = true;
+      btn.textContent = 'Restaurando...';
+      appendConsole('info', `── Restaurando ${name} ──`);
+      try {
+        const res = await apiFetch('/api/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, makeSafetyBackup: true }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          appendConsole('info', `✔ ${data.message}`);
+          if (data.safetyBackup) appendConsole('info', `Safety backup: ${data.safetyBackup}`);
+          toast('Workspace restaurado', 'success');
+          closeBackupModal();
+          await loadFiles();
+        } else {
+          appendConsole('stderr', data.error || 'Falha ao restaurar');
+          toast(data.error || 'Falha ao restaurar', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Restaurar';
+        }
+      } catch (err) {
+        appendConsole('stderr', 'Erro: ' + err.message);
+        toast('Erro ao restaurar', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Restaurar';
+      }
+    };
+  });
+
+  list.querySelectorAll('.btn-del-one').forEach((btn) => {
+    btn.onclick = async () => {
+      const name = btn.dataset.name;
+      if (!confirm(`Apagar backup?\n\n${name}`)) return;
+      try {
+        const res = await apiFetch('/api/backup?name=' + encodeURIComponent(name), { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          toast('Backup apagado', 'success');
+          openRestoreModal();
+        } else {
+          toast(data.error || 'Erro ao apagar', 'error');
+        }
+      } catch (err) {
+        toast('Erro: ' + err.message, 'error');
+      }
+    };
+  });
+}
+
+document.getElementById('btnRestore').onclick = () => openRestoreModal();
+
 // ========== LOGS AO VIVO ==========
 let logEventSource = null;
 
@@ -876,10 +1207,7 @@ function stopLogStream() {
 document.getElementById('btnStopLogs').onclick = stopLogStream;
 
 function startLogStream(mode) {
-  document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.remove('active'));
-  const consoleTab = document.querySelector('.console-tabs .tab[data-tab="console"]');
-  if (consoleTab) consoleTab.classList.add('active');
-  shellInputArea.style.display = 'none';
+  showConsoleTab('console');
 
   if (logEventSource) stopLogStream();
 
@@ -1132,28 +1460,12 @@ function setMobileView(view) {
   });
 
   // Sincroniza tabs internas console/shell/ai
-  const shellInputArea = document.getElementById('shellInputArea');
-  const aiChatArea = document.getElementById('aiChatArea');
-  const consoleOutputEl = document.getElementById('consoleOutput');
-  const aiModelWrap = document.getElementById('aiModelWrap');
-
   if (view === 'ai') {
-    document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'ai'));
-    if (consoleOutputEl) consoleOutputEl.style.display = 'none';
-    if (shellInputArea) shellInputArea.style.display = 'none';
-    if (aiChatArea) aiChatArea.style.display = 'flex';
-    if (aiModelWrap) aiModelWrap.style.display = 'block';
+    showConsoleTab('ai');
   } else if (view === 'console') {
-    document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'console'));
-    if (consoleOutputEl) consoleOutputEl.style.display = 'block';
-    if (shellInputArea) shellInputArea.style.display = 'none';
-    if (aiChatArea) aiChatArea.style.display = 'none';
-    if (aiModelWrap) aiModelWrap.style.display = 'none';
+    showConsoleTab('console');
   } else if (view === 'actions') {
-    // Mostra console com grid de ações
-    if (consoleOutputEl) consoleOutputEl.style.display = 'block';
-    if (shellInputArea) shellInputArea.style.display = 'none';
-    if (aiChatArea) aiChatArea.style.display = 'none';
+    showConsoleTab('console');
     showActionsPanel();
   }
 

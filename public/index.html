@@ -6,6 +6,7 @@
   <title>Simple Replit</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/editor/editor.main.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
 </head>
 <body>
   <div id="app">
@@ -50,6 +51,8 @@
       <div class="sheet-section">
         <div class="sheet-section-label">Deploy &amp; App</div>
         <button id="btnDeploySheet" class="btn btn-deploy">🚀 Deploy</button>
+        <button id="btnBackup" class="btn">💾 Salvar Backup</button>
+        <button id="btnRestore" class="btn">♻ Restaurar Backup</button>
         <button id="btnRestartApp" class="btn">↻ Restart App</button>
         <button id="btnMonitor" class="btn">📊 Monitor</button>
       </div>
@@ -110,10 +113,7 @@
             <button id="btnClearConsole" class="btn-small">Limpar</button>
           </div>
           <pre id="consoleOutput" class="console-output"></pre>
-          <div id="shellInputArea" class="shell-input-area" style="display:none;">
-            <span class="shell-prompt">$</span>
-            <input id="shellInput" type="text" placeholder="Digite o comando e pressione Enter..." autocomplete="off" />
-          </div>
+          <div id="xtermContainer" class="xterm-container" style="display:none;"></div>
           <div id="aiChatArea" class="ai-chat-area" style="display:none;">
             <div id="aiQuickPrompts" class="ai-quick-prompts">
               <button type="button" class="ai-chip" data-prompt="Explique o arquivo aberto de forma simples">Explicar arquivo</button>
@@ -163,6 +163,8 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

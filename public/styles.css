@@ -349,29 +349,25 @@ body {
   color: var(--text);
 }
 
-.shell-input-area {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: #0a0a0a;
-  border-top: 1px solid var(--border);
-}
-
-.shell-prompt {
-  color: var(--success);
-  font-family: monospace;
-  font-weight: bold;
-}
-
-#shellInput {
+.xterm-container {
   flex: 1;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
-  font-size: 13px;
-  outline: none;
+  min-height: 0;
+  padding: 6px 8px 4px;
+  background: #111;
+  overflow: hidden;
+}
+
+.xterm-container .xterm {
+  height: 100%;
+}
+
+.xterm-container .xterm-viewport {
+  overflow-y: auto !important;
+}
+
+/* console panel taller when shell is active */
+.console-panel.shell-active {
+  height: 280px;
 }
 
 .ai-model-select select {
@@ -881,8 +877,17 @@ body.mode-mobile.view-actions .editor-area { display: flex !important; }
 body.mode-mobile.view-actions #editor { display: none !important; }
 body.mode-mobile.view-actions .console-panel { display: flex !important; flex: 1; }
 
-body.mode-mobile #aiInput,
-body.mode-mobile #shellInput { font-size: 16px; }
+body.mode-mobile #aiInput { font-size: 16px; }
+
+body.mode-mobile .console-panel.shell-active {
+  height: auto;
+}
+
+body.mode-mobile.view-console .console-panel.shell-active,
+body.mode-mobile.view-console .xterm-container {
+  flex: 1;
+  min-height: 0;
+}
 
 body.mode-mobile .file-tree { font-size: 15px; padding: 8px; }
 
@@ -1131,6 +1136,64 @@ body.mode-mobile #toastWrap { bottom: 24px; }
   background: #b91c1c !important;
   color: #fff !important;
   border: none;
+}
+
+.backup-modal {
+  width: min(520px, 96vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.backup-modal .modal-hint {
+  font-size: 12px;
+  color: #888;
+  margin: 0 0 12px;
+}
+.backup-list {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 50vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+}
+.backup-name {
+  font-family: monospace;
+  font-size: 12px;
+  color: #e6e6e6;
+  word-break: break-all;
+}
+.backup-meta {
+  font-size: 11px;
+  color: #888;
+  margin-top: 4px;
+}
+.backup-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.backup-actions .btn {
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.backup-empty {
+  padding: 24px;
+  text-align: center;
+  color: #666;
+  font-size: 14px;
 }
 
 /* ===== EDITOR TABS ===== */

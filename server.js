@@ -38,7 +38,9 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
+  const cfg = require('./src/config');
   console.log(`Simple Replit em http://localhost:${PORT}`);
-  console.log(`Workspace: ${require('./src/config').WORKSPACE}`);
+  console.log(`Workspace: ${cfg.WORKSPACE}`);
+  console.log(`Backups:   ${cfg.BACKUP_DIR}`);
   console.log(`Auth: ${AUTH_TOKEN ? 'obrigatória' : 'desligada'}`);
 });
