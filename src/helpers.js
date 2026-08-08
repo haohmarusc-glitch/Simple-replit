@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
 const { WORKSPACE, IGNORE, ALLOWED_DOTFILES } = require('./config');
 
 function getSafePath(userPath) {
@@ -12,19 +11,54 @@ function getSafePath(userPath) {
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new Error('Caminho inválido (path traversal bloqueado)');
   }
+
+  // Sobe até o ancestral existente mais próximo e valida o realpath dele.
+  // Crítico: se o path final ainda não existe (arquivo novo), o check antigo
+  // só via existsSync(resolved) deixava passar symlink tipo
+  // workspace/evil-link → /tmp e gravava fora do workspace.
+  let cursor = resolved;
+  const missing = [];
+  while (cursor !== root && !fs.existsSync(cursor)) {
+    missing.unshift(path.basename(cursor));
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+
   try {
-    if (fs.existsSync(resolved)) {
-      const real = fs.realpathSync(resolved);
-      const relReal = path.relative(root, real);
-      if (relReal.startsWith('..') || path.isAbsolute(relReal)) {
+    const realBase = fs.existsSync(cursor) ? fs.realpathSync(cursor) : root;
+    const rootReal = fs.realpathSync(root);
+    const relBase = path.relative(rootReal, realBase);
+    if (relBase.startsWith('..') || path.isAbsolute(relBase)) {
+      throw new Error('Caminho inválido (symlink fora do workspace)');
+    }
+    // Reconstrói o path final sob o ancestral real (sem seguir links futuros)
+    let finalPath = realBase;
+    for (const part of missing) {
+      if (part === '..' || part === '.' || part.includes('\0')) {
+        throw new Error('Caminho inválido');
+      }
+      finalPath = path.join(finalPath, part);
+      // garante que cada segmento ainda está sob rootReal
+      const relSeg = path.relative(rootReal, finalPath);
+      if (relSeg.startsWith('..') || path.isAbsolute(relSeg)) {
+        throw new Error('Caminho inválido (path traversal bloqueado)');
+      }
+    }
+    // Se o path completo já existe, realpath final também
+    if (fs.existsSync(finalPath)) {
+      const realFinal = fs.realpathSync(finalPath);
+      const relFinal = path.relative(rootReal, realFinal);
+      if (relFinal.startsWith('..') || path.isAbsolute(relFinal)) {
         throw new Error('Caminho inválido (symlink fora do workspace)');
       }
-      return real;
+      return realFinal;
     }
+    return finalPath;
   } catch (e) {
-    if (e.message.includes('inválido')) throw e;
+    if (e.message && e.message.includes('inválido')) throw e;
+    throw new Error('Caminho inválido');
   }
-  return resolved;
 }
 
 function listFiles(dir, base = '', depth = 0) {
