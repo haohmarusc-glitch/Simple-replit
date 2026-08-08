@@ -79,6 +79,7 @@ function showLoginGate(msg) {
       if (!v) return;
       setAuthToken(v);
       gate.style.display = 'none';
+      startClean();
       loadFiles();
       fetch('/api/ai/status', { headers: authHeaders() }).then(r => r.json()).then(s => {
         const el = document.getElementById('aiStatus');
@@ -98,8 +99,7 @@ function showLoginGate(msg) {
 
 function logout() {
   setAuthToken('');
-  openTabs = [];
-  currentFile = null;
+  startClean();
   showLoginGate('Sessão encerrada. Entre de novo.');
 }
 
@@ -130,13 +130,35 @@ fetch('/api/auth/status')
   .catch(() => {});
 
 // ========== MONACO SETUP ==========
+const WELCOME_CODE =
+  '# Bem-vindo ao Simple Replit!\n# Digite seu código e clique em Rodar\n\nprint("Olá, mundo!")\n';
+
+/** Sempre inicia limpo: sem abas, editor de boas-vindas */
+function startClean() {
+  openTabs = [];
+  currentFile = null;
+  dirty = false;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = null;
+  if (editor) {
+    editor.setValue(WELCOME_CODE);
+    monaco.editor.setModelLanguage(editor.getModel(), 'python');
+  }
+  currentLanguage = 'python';
+  const langSel = document.getElementById('languageSelect');
+  if (langSel) langSel.value = 'python';
+  if (typeof renderEditorTabs === 'function') renderEditorTabs();
+  if (typeof updateBreadcrumb === 'function') updateBreadcrumb('');
+  if (typeof renderFileTree === 'function' && files && files.length) renderFileTree();
+}
+
 require.config({
   paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }
 });
 
 require(['vs/editor/editor.main'], function () {
   editor = monaco.editor.create(document.getElementById('editor'), {
-    value: '# Bem-vindo ao Simple Replit!\n# Digite seu código e clique em Rodar\n\nprint("Olá, mundo!")\n',
+    value: WELCOME_CODE,
     language: 'python',
     theme: 'vs-dark',
     fontSize: 14,
@@ -177,15 +199,17 @@ require(['vs/editor/editor.main'], function () {
     }, 2000);
   });
 
-  window.addEventListener('beforeunload', (e) => {
-    if (openTabs.some((t) => t.dirty) || dirty) {
-      e.preventDefault();
-      e.returnValue = '';
-    }
-  });
+  // Não avisa ao sair: início sempre limpo, sem estado a preservar entre sessões
+  // (aba/arquivo não são restaurados de propósito)
 
-  // Carrega arquivos ao iniciar
+  // Garante estado limpo + carrega árvore
+  startClean();
   loadFiles();
+});
+
+// Se o browser restaurar a página do cache (bfcache), força início limpo de novo
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted && editor) startClean();
 });
 
 // ========== TABS ==========
