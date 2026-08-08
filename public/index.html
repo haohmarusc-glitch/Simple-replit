@@ -58,10 +58,17 @@
         <div id="editor" class="editor"></div>
         <div class="console-panel">
           <div class="console-header">
-            <span>Console</span>
+            <div class="console-tabs">
+              <button class="tab active" data-tab="console">Console</button>
+              <button class="tab" data-tab="shell">Shell</button>
+            </div>
             <button id="btnClearConsole" class="btn-small">Limpar</button>
           </div>
           <pre id="consoleOutput" class="console-output"></pre>
+          <div id="shellInputArea" class="shell-input-area" style="display:none;">
+            <span class="shell-prompt">$</span>
+            <input id="shellInput" type="text" placeholder="Digite o comando e pressione Enter..." autocomplete="off" />
+          </div>
         </div>
       </div>
     </div>

@@ -268,6 +268,56 @@ body {
   color: var(--text-muted);
 }
 
+.console-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.console-tabs .tab {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.console-tabs .tab.active {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.console-tabs .tab:hover {
+  color: var(--text);
+}
+
+.shell-input-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #0a0a0a;
+  border-top: 1px solid var(--border);
+}
+
+.shell-prompt {
+  color: var(--success);
+  font-family: monospace;
+  font-weight: bold;
+}
+
+#shellInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+  font-size: 13px;
+  outline: none;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

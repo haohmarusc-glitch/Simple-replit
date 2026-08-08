@@ -262,6 +262,45 @@ app.post('/api/run', (req, res) => {
   }
 });
 
+// ========== SHELL ==========
+const BLOCKED_COMMANDS = [
+  'rm -rf /', 'rm -rf /*', 'mkfs', 'dd if=', ':(){', 'shutdown', 'reboot',
+  'passwd', 'userdel', 'chmod 777 /', 'chown -R'
+];
+
+app.post('/api/shell', (req, res) => {
+  const { command } = req.body;
+  if (!command || !command.trim()) {
+    return res.status(400).json({ success: false, error: 'Comando vazio' });
+  }
+
+  const cmd = command.trim();
+
+  for (const blocked of BLOCKED_COMMANDS) {
+    if (cmd.includes(blocked)) {
+      return res.json({
+        success: false,
+        output: '',
+        error: `Comando bloqueado por segurança: contém "${blocked}"`
+      });
+    }
+  }
+
+  exec(cmd, {
+    cwd: WORKSPACE,
+    timeout: 30000,
+    maxBuffer: 3 * 1024 * 1024,
+    shell: '/bin/bash'
+  }, (error, stdout, stderr) => {
+    res.json({
+      success: !error,
+      output: (stdout || '').trim(),
+      error: (stderr || (error ? error.message : '')).trim(),
+      code: error ? error.code : 0
+    });
+  });
+});
+
 // ========== GIT ==========
 function runGit(args, callback) {
   const cmd = `git ${args.join(' ')}`;

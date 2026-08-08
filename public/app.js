@@ -401,3 +401,45 @@ document.getElementById('btnGitCommit').onclick = () => {
   appendConsole('info', '── git add + commit ──');
   gitAction('/api/git/commit', 'POST', { message });
 };
+
+// ========== SHELL ==========
+const shellInput = document.getElementById('shellInput');
+const shellInputArea = document.getElementById('shellInputArea');
+
+document.querySelectorAll('.console-tabs .tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const isShell = tab.dataset.tab === 'shell';
+    shellInputArea.style.display = isShell ? 'flex' : 'none';
+    if (isShell) shellInput.focus();
+  };
+});
+
+async function runShellCommand(cmd) {
+  if (!cmd.trim()) return;
+  appendConsole('info', `$ ${cmd}`);
+  try {
+    const res = await fetch('/api/shell', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd })
+    });
+    const data = await res.json();
+    if (data.output) appendConsole('stdout', data.output);
+    if (data.error) appendConsole('stderr', data.error);
+    if (data.success && !data.output && !data.error) {
+      appendConsole('info', '(sem saída)');
+    }
+  } catch (err) {
+    appendConsole('stderr', 'Erro de conexão: ' + err.message);
+  }
+}
+
+shellInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const cmd = shellInput.value;
+    shellInput.value = '';
+    runShellCommand(cmd);
+  }
+});
