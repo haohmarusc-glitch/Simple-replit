@@ -12,6 +12,7 @@ IDE simples no navegador (estilo Replit) feito para editar e rodar código do pr
 - Tema dark
 - Atalhos: `Ctrl+S` (salvar) e `Ctrl+Enter` (rodar)
 - Suporte a monorepos grandes (ignora `node_modules`, `.git`, etc.)
+- **Git integrado**: Status, Pull, Commit e Push direto pela interface
 
 ## Como usar na VPS (Opção 3)
 
