@@ -352,3 +352,52 @@ document.getElementById('languageSelect').onchange = (e) => {
     monaco.editor.setModelLanguage(editor.getModel(), currentLanguage);
   }
 };
+
+// ========== GIT ==========
+async function gitAction(endpoint, method = 'GET', body = null) {
+  try {
+    const opts = { method };
+    if (body) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch(endpoint, opts);
+    const data = await res.json();
+
+    if (data.output) appendConsole('stdout', data.output);
+    if (data.error) appendConsole('stderr', data.error);
+    if (data.success && !data.output && !data.error) {
+      appendConsole('info', '✔ OK');
+    }
+    if (!data.success && data.error) {
+      appendConsole('stderr', data.error);
+    }
+    return data;
+  } catch (err) {
+    appendConsole('stderr', 'Erro Git: ' + err.message);
+  }
+}
+
+document.getElementById('btnGitStatus').onclick = () => {
+  appendConsole('info', '── git status ──');
+  gitAction('/api/git/status');
+};
+
+document.getElementById('btnGitPull').onclick = () => {
+  if (!confirm('Fazer git pull?')) return;
+  appendConsole('info', '── git pull ──');
+  gitAction('/api/git/pull', 'POST');
+};
+
+document.getElementById('btnGitPush').onclick = () => {
+  if (!confirm('Fazer git push?')) return;
+  appendConsole('info', '── git push ──');
+  gitAction('/api/git/push', 'POST');
+};
+
+document.getElementById('btnGitCommit').onclick = () => {
+  const message = prompt('Mensagem do commit:');
+  if (!message) return;
+  appendConsole('info', '── git add + commit ──');
+  gitAction('/api/git/commit', 'POST', { message });
+};

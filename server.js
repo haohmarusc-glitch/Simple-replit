@@ -262,6 +262,67 @@ app.post('/api/run', (req, res) => {
   }
 });
 
+// ========== GIT ==========
+function runGit(args, callback) {
+  const cmd = `git ${args.join(' ')}`;
+  exec(cmd, {
+    cwd: WORKSPACE,
+    timeout: 60000,
+    maxBuffer: 5 * 1024 * 1024
+  }, (error, stdout, stderr) => {
+    callback({
+      success: !error,
+      output: (stdout || '').trim(),
+      error: (stderr || (error ? error.message : '')).trim()
+    });
+  });
+}
+
+// Status
+app.get('/api/git/status', (req, res) => {
+  runGit(['status', '--porcelain', '-b'], (result) => {
+    if (!result.success && result.error.includes('not a git repository')) {
+      return res.json({ success: false, error: 'Não é um repositório Git' });
+    }
+    res.json(result);
+  });
+});
+
+// Pull
+app.post('/api/git/pull', (req, res) => {
+  runGit(['pull'], (result) => res.json(result));
+});
+
+// Push
+app.post('/api/git/push', (req, res) => {
+  runGit(['push'], (result) => res.json(result));
+});
+
+// Add + Commit
+app.post('/api/git/commit', (req, res) => {
+  const { message } = req.body;
+  if (!message || !message.trim()) {
+    return res.status(400).json({ success: false, error: 'Mensagem de commit obrigatória' });
+  }
+
+  // Primeiro faz add de tudo, depois commit
+  runGit(['add', '-A'], (addResult) => {
+    if (!addResult.success) {
+      return res.json(addResult);
+    }
+    // Escapa aspas na mensagem
+    const safeMsg = message.replace(/"/g, '\\"');
+    runGit(['commit', '-m', `"${safeMsg}"`], (commitResult) => {
+      res.json(commitResult);
+    });
+  });
+});
+
+// Log resumido
+app.get('/api/git/log', (req, res) => {
+  runGit(['log', '--oneline', '-10'], (result) => res.json(result));
+});
+
 // Info do workspace (útil para debug)
 app.get('/api/info', (req, res) => {
   res.json({
