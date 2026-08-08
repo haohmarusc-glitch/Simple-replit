@@ -14,6 +14,11 @@
       <div class="logo">
         <span class="logo-icon">◈</span>
         <span class="logo-text">Simple Replit</span>
+        <button type="button" id="gitBranchBadge" class="git-branch-badge" title="Painel Git" style="display:none;">
+          <span class="git-branch-icon">⎇</span>
+          <span id="gitBranchName">—</span>
+          <span id="gitBranchMeta" class="git-branch-meta"></span>
+        </button>
       </div>
       <div id="fileBreadcrumb" class="file-breadcrumb" title=""></div>
       <div class="top-actions">
@@ -43,8 +48,9 @@
       <div class="sheet-title mobile-only">Ações</div>
       <div class="sheet-section">
         <div class="sheet-section-label">Git</div>
-        <button id="btnGitStatus" class="btn">Git Status</button>
+        <button id="btnGitPanel" class="btn btn-primary">⎇ Painel Git</button>
         <button id="btnGitDiff" class="btn">Git Diff</button>
+        <button id="btnGitStatus" class="btn">Git Status</button>
         <button id="btnGitPull" class="btn">Git Pull</button>
         <button id="btnGitCommit" class="btn">Git Commit</button>
         <button id="btnGitPush" class="btn">Git Push</button>

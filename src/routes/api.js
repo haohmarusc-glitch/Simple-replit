@@ -3,7 +3,7 @@ const path = require('path');
 const { exec, spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 const { WORKSPACE, AUTH_TOKEN, SHELL_OPEN, BACKUP_DIR, PORT } = require('../config');
-const { getSafePath, listFiles, runGit, loadEnvKeys } = require('../helpers');
+const { getSafePath, listFiles, runGit, runGitAsync, loadEnvKeys } = require('../helpers');
 const { rateLimit } = require('../middleware');
 
 module.exports = function registerRoutes(app) {
@@ -596,19 +596,139 @@ app.post('/api/logs/stop', (req, res) => {
 });
 
 // ========== GIT ==========
-// Status
+function parsePorcelain(output) {
+  const files = [];
+  const lines = (output || '').split('\n').filter(Boolean);
+  for (const line of lines) {
+    const code = line.slice(0, 2);
+    let pathPart = line.slice(3);
+    let path = pathPart;
+    let oldPath = null;
+    if (pathPart.includes(' -> ')) {
+      const parts = pathPart.split(' -> ');
+      oldPath = parts[0].replace(/^"|"$/g, '');
+      path = parts[1].replace(/^"|"$/g, '');
+    } else {
+      path = pathPart.replace(/^"|"$/g, '');
+    }
+    const x = code[0];
+    const y = code[1];
+    let status = 'modified';
+    if (x === '?' || y === '?') status = 'untracked';
+    else if (x === 'A' || y === 'A') status = 'added';
+    else if (x === 'D' || y === 'D') status = 'deleted';
+    else if (x === 'R' || y === 'R') status = 'renamed';
+    else if (x === 'M' || y === 'M') status = 'modified';
+    const staged = x !== ' ' && x !== '?' && x !== '!';
+    const unstaged = y !== ' ' && y !== '?' && y !== '!';
+    files.push({ path, oldPath, status, code: code.trim(), staged, unstaged, xy: code });
+  }
+  return files;
+}
+
+function validateGitPaths(paths) {
+  if (!Array.isArray(paths) || !paths.length) return { ok: false, error: 'paths obrigatório' };
+  const safe = [];
+  for (const p of paths) {
+    if (typeof p !== 'string' || !p.trim()) continue;
+    if (p.includes('..') || p.startsWith('/')) {
+      return { ok: false, error: 'path inválido: ' + p };
+    }
+    try {
+      getSafePath(p);
+      safe.push(p.replace(/^\/+/, ''));
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+  if (!safe.length) return { ok: false, error: 'nenhum path válido' };
+  return { ok: true, paths: safe };
+}
+
+// Status (texto) — compat
 app.get('/api/git/status', (req, res) => {
   runGit(['status', '--porcelain', '-b'], (result) => {
-    if (!result.success && result.error.includes('not a git repository')) {
+    if (!result.success && (result.error || '').includes('not a git repository')) {
       return res.json({ success: false, error: 'Não é um repositório Git' });
     }
     res.json(result);
   });
 });
 
+// Resumo rico: branch + upstream + arquivos
+app.get('/api/git/summary', async (req, res) => {
+  try {
+    const [branchR, upstreamR, statusR, logR] = await Promise.all([
+      runGitAsync(['rev-parse', '--abbrev-ref', 'HEAD']),
+      runGitAsync(['status', '-sb']),
+      runGitAsync(['status', '--porcelain']),
+      runGitAsync(['log', '-15', '--pretty=format:%h|%an|%ar|%s']),
+    ]);
+
+    if (!branchR.success && (branchR.error || '').toLowerCase().includes('not a git')) {
+      return res.json({ success: false, error: 'Não é um repositório Git' });
+    }
+
+    const branch = branchR.success ? branchR.output : '?';
+    let ahead = 0;
+    let behind = 0;
+    const sb = upstreamR.output || '';
+    const mAhead = sb.match(/ahead\s+(\d+)/);
+    const mBehind = sb.match(/behind\s+(\d+)/);
+    if (mAhead) ahead = parseInt(mAhead[1], 10);
+    if (mBehind) behind = parseInt(mBehind[1], 10);
+
+    const files = parsePorcelain(statusR.output);
+    const commits = [];
+    if (logR.success && logR.output) {
+      for (const line of logR.output.split('\n').filter(Boolean)) {
+        const [hash, author, when, ...rest] = line.split('|');
+        commits.push({ hash, author, when, message: rest.join('|') });
+      }
+    }
+
+    res.json({
+      success: true,
+      branch,
+      ahead,
+      behind,
+      shortStatus: sb.split('\n')[0] || branch,
+      files,
+      commits,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/git/branch', (req, res) => {
+  runGit(['rev-parse', '--abbrev-ref', 'HEAD'], (result) => {
+    if (!result.success) {
+      return res.json({ success: false, error: result.error || 'sem branch', branch: null });
+    }
+    res.json({ success: true, branch: result.output });
+  });
+});
+
+app.get('/api/git/branches', (req, res) => {
+  runGit(['branch', '--format=%(refname:short)'], (result) => {
+    if (!result.success) return res.json({ success: false, error: result.error, branches: [] });
+    const branches = (result.output || '').split('\n').filter(Boolean);
+    res.json({ success: true, branches });
+  });
+});
+
+app.post('/api/git/checkout', (req, res) => {
+  const branch = ((req.body && req.body.branch) || '').trim();
+  if (!branch || !/^[a-zA-Z0-9._\/~-]+$/.test(branch)) {
+    return res.status(400).json({ success: false, error: 'branch inválida' });
+  }
+  runGit(['checkout', branch], (result) => res.json(result));
+});
+
 // Pull
 app.post('/api/git/pull', (req, res) => {
-  runGit(['pull'], (result) => res.json(result));
+  runGit(['pull', '--ff-only'], (result) => res.json(result));
 });
 
 // Push
@@ -616,29 +736,95 @@ app.post('/api/git/push', (req, res) => {
   runGit(['push'], (result) => res.json(result));
 });
 
-// Add + Commit
-app.post('/api/git/commit', (req, res) => {
-  const { message } = req.body;
-  if (!message || !message.trim()) {
-    return res.status(400).json({ success: false, error: 'Mensagem de commit obrigatória' });
+// Stage (add paths ou -A)
+app.post('/api/git/stage', (req, res) => {
+  const all = req.body && req.body.all;
+  if (all) {
+    return runGit(['add', '-A'], (result) => res.json(result));
   }
+  const v = validateGitPaths(req.body && req.body.paths);
+  if (!v.ok) return res.status(400).json({ success: false, error: v.error });
+  runGit(['add', '--', ...v.paths], (result) => res.json(result));
+});
 
-  // Primeiro faz add de tudo, depois commit
-  runGit(['add', '-A'], (addResult) => {
-    if (!addResult.success) {
-      return res.json(addResult);
+// Unstage
+app.post('/api/git/unstage', (req, res) => {
+  const v = validateGitPaths(req.body && req.body.paths);
+  if (!v.ok) return res.status(400).json({ success: false, error: v.error });
+  runGit(['restore', '--staged', '--', ...v.paths], (result) => {
+    // fallback git reset HEAD for older git
+    if (!result.success) {
+      return runGit(['reset', 'HEAD', '--', ...v.paths], (r2) => res.json(r2));
     }
-    // Escapa aspas na mensagem
-    const safeMsg = message.replace(/"/g, '\\"');
-    runGit(['commit', '-m', `"${safeMsg}"`], (commitResult) => {
-      res.json(commitResult);
-    });
+    res.json(result);
   });
 });
 
-// Log resumido
+// Discard working tree changes (cuidado)
+app.post('/api/git/discard', (req, res) => {
+  const v = validateGitPaths(req.body && req.body.paths);
+  if (!v.ok) return res.status(400).json({ success: false, error: v.error });
+  // untracked: rm; tracked: restore
+  runGit(['status', '--porcelain', '--', ...v.paths], async (st) => {
+    const files = parsePorcelain(st.output);
+    const results = [];
+    for (const f of files.length ? files : v.paths.map((p) => ({ path: p, status: 'modified' }))) {
+      if (f.status === 'untracked') {
+        try {
+          const full = getSafePath(f.path);
+          if (fs.existsSync(full)) {
+            const stat = fs.statSync(full);
+            if (stat.isDirectory()) fs.rmSync(full, { recursive: true, force: true });
+            else fs.unlinkSync(full);
+          }
+          results.push({ path: f.path, success: true, action: 'deleted-untracked' });
+        } catch (err) {
+          results.push({ path: f.path, success: false, error: err.message });
+        }
+      } else {
+        const r = await runGitAsync(['restore', '--worktree', '--', f.path]);
+        results.push({ path: f.path, success: r.success, error: r.error, action: 'restored' });
+      }
+    }
+    const ok = results.every((r) => r.success);
+    res.json({ success: ok, results });
+  });
+});
+
+// Commit (opcional: paths específicos; senão add -A)
+app.post('/api/git/commit', async (req, res) => {
+  const message = (req.body && req.body.message) || '';
+  if (!message || !String(message).trim()) {
+    return res.status(400).json({ success: false, error: 'Mensagem de commit obrigatória' });
+  }
+  const paths = req.body && req.body.paths;
+
+  if (Array.isArray(paths) && paths.length) {
+    const v = validateGitPaths(paths);
+    if (!v.ok) return res.status(400).json({ success: false, error: v.error });
+    const addR = await runGitAsync(['add', '--', ...v.paths]);
+    if (!addR.success) return res.json(addR);
+  } else if (req.body && req.body.all !== false) {
+    const addR = await runGitAsync(['add', '-A']);
+    if (!addR.success) return res.json(addR);
+  }
+
+  const commitR = await runGitAsync(['commit', '-m', String(message).trim()]);
+  res.json(commitR);
+});
+
+// Log estruturado
 app.get('/api/git/log', (req, res) => {
-  runGit(['log', '--oneline', '-10'], (result) => res.json(result));
+  const n = Math.min(50, Math.max(1, parseInt(req.query.n || '15', 10) || 15));
+  runGit(['log', `-${n}`, '--pretty=format:%h|%an|%ar|%s'], (result) => {
+    if (!result.success) return res.json({ success: false, error: result.error, commits: [] });
+    const commits = [];
+    for (const line of (result.output || '').split('\n').filter(Boolean)) {
+      const [hash, author, when, ...rest] = line.split('|');
+      commits.push({ hash, author, when, message: rest.join('|') });
+    }
+    res.json({ success: true, commits, output: result.output });
+  });
 });
 
 // Lista arquivos alterados (status porcelain parseado)
@@ -647,32 +833,7 @@ app.get('/api/git/changed', (req, res) => {
     if (!result.success && (result.error || '').includes('not a git repository')) {
       return res.json({ success: false, error: 'Não é um repositório Git', files: [] });
     }
-    const files = [];
-    const lines = (result.output || '').split('\n').filter(Boolean);
-    for (const line of lines) {
-      // XY PATH or XY ORIG -> PATH (rename)
-      const code = line.slice(0, 2);
-      let pathPart = line.slice(3);
-      let path = pathPart;
-      let oldPath = null;
-      if (pathPart.includes(' -> ')) {
-        const parts = pathPart.split(' -> ');
-        oldPath = parts[0].replace(/^"|"$/g, '');
-        path = parts[1].replace(/^"|"$/g, '');
-      } else {
-        path = pathPart.replace(/^"|"$/g, '');
-      }
-      const x = code[0];
-      const y = code[1];
-      let status = 'modified';
-      if (x === '?' || y === '?') status = 'untracked';
-      else if (x === 'A' || y === 'A') status = 'added';
-      else if (x === 'D' || y === 'D') status = 'deleted';
-      else if (x === 'R' || y === 'R') status = 'renamed';
-      else if (x === 'M' || y === 'M') status = 'modified';
-      files.push({ path, oldPath, status, code: code.trim() });
-    }
-    res.json({ success: true, files, output: result.output });
+    res.json({ success: true, files: parsePorcelain(result.output), output: result.output });
   });
 });
 
@@ -681,14 +842,16 @@ app.get('/api/git/diff', (req, res) => {
   const filePath = (req.query.path || '').trim();
   if (filePath) {
     try {
-      getSafePath(filePath); // valida path traversal
+      getSafePath(filePath);
     } catch (err) {
       return res.status(400).json({ success: false, error: err.message });
     }
   }
-  const args = filePath ? ['diff', '--', filePath] : ['diff'];
+  const staged = req.query.staged === '1' || req.query.staged === 'true';
+  const args = staged
+    ? (filePath ? ['diff', '--cached', '--', filePath] : ['diff', '--cached'])
+    : (filePath ? ['diff', '--', filePath] : ['diff']);
   runGit(args, (result) => {
-    // untracked: git diff não mostra — tenta diff contra /dev/null via status
     if (filePath && result.success && !result.output) {
       runGit(['status', '--porcelain', '--', filePath], (st) => {
         const isUntracked = (st.output || '').startsWith('??');
@@ -698,11 +861,7 @@ app.get('/api/git/diff', (req, res) => {
             if (fs.existsSync(full) && fs.statSync(full).isFile()) {
               const content = fs.readFileSync(full, 'utf8');
               if (content.length > 500000) {
-                return res.json({
-                  success: true,
-                  output: `(arquivo novo muito grande para diff)`,
-                  untracked: true,
-                });
+                return res.json({ success: true, output: '(arquivo novo muito grande para diff)', untracked: true });
               }
               const lined = content.split('\n').map((l) => '+' + l).join('\n');
               return res.json({
@@ -733,17 +892,10 @@ app.get('/api/git/show', (req, res) => {
   } catch (err) {
     return res.status(400).json({ success: false, error: err.message });
   }
-  // git show HEAD:path — path não pode começar com /
   const safeRel = filePath.replace(/^\/+/, '');
   runGit(['show', `${ref}:${safeRel}`], (result) => {
     if (!result.success) {
-      // arquivo novo (não existe no HEAD)
-      return res.json({
-        success: true,
-        content: '',
-        missing: true,
-        error: result.error,
-      });
+      return res.json({ success: true, content: '', missing: true, error: result.error });
     }
     const content = result.output || '';
     if (content.length > 2 * 1024 * 1024) {

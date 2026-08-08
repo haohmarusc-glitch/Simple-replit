@@ -86,18 +86,41 @@ function loadEnvKeys() {
 }
 
 function runGit(args, callback) {
-  const cmd = `git ${args.join(' ')}`;
-  exec(cmd, {
+  const { spawn } = require('child_process');
+  const child = spawn('git', args, {
     cwd: WORKSPACE,
     timeout: 60000,
-    maxBuffer: 5 * 1024 * 1024,
-  }, (error, stdout, stderr) => {
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+  });
+  let stdout = '';
+  let stderr = '';
+  const timer = setTimeout(() => {
+    try { child.kill('SIGKILL'); } catch (_) {}
+  }, 60000);
+  child.stdout.on('data', (d) => { stdout += d.toString(); });
+  child.stderr.on('data', (d) => { stderr += d.toString(); });
+  child.on('error', (error) => {
+    clearTimeout(timer);
     callback({
-      success: !error,
-      output: (stdout || '').trim(),
-      error: (stderr || (error ? error.message : '')).trim(),
+      success: false,
+      output: '',
+      error: error.message,
+    });
+  });
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    callback({
+      success: code === 0,
+      output: stdout.trim(),
+      error: stderr.trim(),
+      code,
     });
   });
 }
 
-module.exports = { getSafePath, listFiles, runGit, loadEnvKeys };
+/** Promise wrapper */
+function runGitAsync(args) {
+  return new Promise((resolve) => runGit(args, resolve));
+}
+
+module.exports = { getSafePath, listFiles, runGit, runGitAsync, loadEnvKeys };

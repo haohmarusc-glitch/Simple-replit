@@ -333,6 +333,7 @@ async function loadFiles() {
   } catch (err) {
     console.error('Erro ao carregar arquivos:', err);
   }
+  if (typeof refreshGitBadge === 'function') refreshGitBadge();
 }
 
 function renderFileTree() {
@@ -766,23 +767,255 @@ document.getElementById('btnGitStatus').onclick = () => {
 };
 
 document.getElementById('btnGitPull').onclick = () => {
-  if (!confirm('Fazer git pull?')) return;
+  if (!confirm('Fazer git pull (--ff-only)?')) return;
   appendConsole('info', '── git pull ──');
-  gitAction('/api/git/pull', 'POST');
+  gitAction('/api/git/pull', 'POST').then(() => refreshGitBadge());
 };
 
 document.getElementById('btnGitPush').onclick = () => {
   if (!confirm('Fazer git push?')) return;
   appendConsole('info', '── git push ──');
-  gitAction('/api/git/push', 'POST');
+  gitAction('/api/git/push', 'POST').then(() => refreshGitBadge());
 };
 
 document.getElementById('btnGitCommit').onclick = async () => {
   const message = await promptName('Mensagem do commit', 'update');
   if (!message) return;
   appendConsole('info', '── git add + commit ──');
-  gitAction('/api/git/commit', 'POST', { message });
+  await gitAction('/api/git/commit', 'POST', { message });
+  refreshGitBadge();
 };
+
+// ========== GIT BADGE + PAINEL ==========
+let gitSummaryCache = null;
+
+async function refreshGitBadge() {
+  const badge = document.getElementById('gitBranchBadge');
+  const nameEl = document.getElementById('gitBranchName');
+  const metaEl = document.getElementById('gitBranchMeta');
+  if (!badge) return;
+  try {
+    const res = await apiFetch('/api/git/summary');
+    const data = await res.json();
+    if (!data.success) {
+      badge.style.display = 'none';
+      return;
+    }
+    gitSummaryCache = data;
+    badge.style.display = 'inline-flex';
+    nameEl.textContent = data.branch || '?';
+    const parts = [];
+    if (data.files && data.files.length) parts.push(data.files.length + 'Δ');
+    if (data.ahead) parts.push('↑' + data.ahead);
+    if (data.behind) parts.push('↓' + data.behind);
+    metaEl.textContent = parts.join(' ');
+    badge.classList.toggle('has-changes', !!(data.files && data.files.length));
+  } catch (_) {
+    badge.style.display = 'none';
+  }
+}
+
+function closeGitPanel() {
+  const el = document.getElementById('gitOverlay');
+  if (el) el.remove();
+}
+
+async function openGitPanel(tab) {
+  closeGitPanel();
+  if (typeof closeSheet === 'function') closeSheet();
+
+  let data = gitSummaryCache;
+  try {
+    const res = await apiFetch('/api/git/summary');
+    data = await res.json();
+    if (data.success) gitSummaryCache = data;
+  } catch (err) {
+    toast('Erro Git: ' + err.message, 'error');
+    return;
+  }
+  if (!data || !data.success) {
+    toast((data && data.error) || 'Não é um repositório Git', 'error');
+    return;
+  }
+
+  const activeTab = tab || 'changes';
+  const overlay = document.createElement('div');
+  overlay.id = 'gitOverlay';
+  overlay.className = 'git-overlay';
+  overlay.innerHTML = `
+    <div class="git-panel">
+      <div class="git-panel-header">
+        <h3>⎇ ${data.branch || 'Git'}${data.files && data.files.length ? ' · ' + data.files.length + ' alteração(ões)' : ''}</h3>
+        <button type="button" class="btn" id="gitPanelClose">Fechar</button>
+      </div>
+      <div class="git-panel-tabs">
+        <button type="button" data-gtab="changes" class="${activeTab === 'changes' ? 'active' : ''}">Alterações</button>
+        <button type="button" data-gtab="history" class="${activeTab === 'history' ? 'active' : ''}">Histórico</button>
+      </div>
+      <div class="git-panel-body" id="gitPanelBody"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  document.getElementById('gitPanelClose').onclick = closeGitPanel;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeGitPanel(); });
+
+  const body = document.getElementById('gitPanelBody');
+
+  function renderChanges() {
+    const files = data.files || [];
+    if (!files.length) {
+      body.innerHTML = '<div class="git-empty">Working tree limpa.</div>';
+      return;
+    }
+    body.innerHTML = '';
+    files.forEach((f) => {
+      const row = document.createElement('div');
+      row.className = 'git-file-row';
+      row.innerHTML = `
+        <span class="diff-badge ${f.status}">${(f.status || '?')[0]}</span>
+        <span class="git-file-path" title="${f.path}">${f.path}</span>
+        <div class="git-file-actions">
+          <button type="button" class="btn" data-act="diff">Diff</button>
+          <button type="button" class="btn" data-act="open">Abrir</button>
+          <button type="button" class="btn" data-act="stage">Stage</button>
+          <button type="button" class="btn btn-danger" data-act="discard">Descartar</button>
+        </div>`;
+      row.querySelector('[data-act="diff"]').onclick = () => {
+        closeGitPanel();
+        openGitDiff(f.path);
+      };
+      row.querySelector('[data-act="open"]').onclick = () => {
+        closeGitPanel();
+        openFile(f.path);
+      };
+      row.querySelector('[data-act="stage"]').onclick = async () => {
+        const res = await apiFetch('/api/git/stage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths: [f.path] }),
+        });
+        const r = await res.json();
+        if (r.success) toast('Staged: ' + f.path, 'success');
+        else toast(r.error || 'Falha no stage', 'error');
+        await openGitPanel('changes');
+        refreshGitBadge();
+      };
+      row.querySelector('[data-act="discard"]').onclick = async () => {
+        if (!confirm('Descartar alterações em:\n' + f.path + '\n\nIsso não pode ser desfeito.')) return;
+        const res = await apiFetch('/api/git/discard', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths: [f.path] }),
+        });
+        const r = await res.json();
+        if (r.success) toast('Descartado: ' + f.path, 'success');
+        else toast(r.error || 'Falha ao descartar', 'error');
+        await openGitPanel('changes');
+        refreshGitBadge();
+        loadFiles();
+      };
+      row.querySelector('.git-file-path').onclick = () => {
+        closeGitPanel();
+        openFile(f.path);
+      };
+      body.appendChild(row);
+    });
+
+    const box = document.createElement('div');
+    box.className = 'git-commit-box';
+    box.innerHTML = `
+      <textarea id="gitCommitMsg" placeholder="Mensagem do commit..."></textarea>
+      <div class="git-commit-actions">
+        <button type="button" class="btn btn-primary" id="gitDoCommit">Commit (tudo)</button>
+        <button type="button" class="btn" id="gitDoStageAll">Stage all</button>
+        <button type="button" class="btn" id="gitDoPull">Pull</button>
+        <button type="button" class="btn" id="gitDoPush">Push</button>
+        <button type="button" class="btn" id="gitDoDiff">Diff visual</button>
+      </div>`;
+    body.appendChild(box);
+
+    document.getElementById('gitDoCommit').onclick = async () => {
+      const msg = document.getElementById('gitCommitMsg').value.trim();
+      if (!msg) { toast('Digite a mensagem do commit', 'error'); return; }
+      const res = await apiFetch('/api/git/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, all: true }),
+      });
+      const r = await res.json();
+      if (r.success) {
+        toast('Commit OK', 'success');
+        appendConsole('info', r.output || 'commit ok');
+        await openGitPanel('changes');
+        refreshGitBadge();
+      } else {
+        toast(r.error || 'Commit falhou', 'error');
+        appendConsole('stderr', r.error || r.output || '');
+      }
+    };
+    document.getElementById('gitDoStageAll').onclick = async () => {
+      await apiFetch('/api/git/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      });
+      toast('Stage all', 'success');
+      await openGitPanel('changes');
+      refreshGitBadge();
+    };
+    document.getElementById('gitDoPull').onclick = async () => {
+      if (!confirm('git pull --ff-only?')) return;
+      const r = await gitAction('/api/git/pull', 'POST');
+      if (r && r.success) toast('Pull OK', 'success');
+      await openGitPanel('changes');
+      refreshGitBadge();
+    };
+    document.getElementById('gitDoPush').onclick = async () => {
+      if (!confirm('git push?')) return;
+      const r = await gitAction('/api/git/push', 'POST');
+      if (r && r.success) toast('Push OK', 'success');
+      await openGitPanel('changes');
+      refreshGitBadge();
+    };
+    document.getElementById('gitDoDiff').onclick = () => {
+      closeGitPanel();
+      openGitDiff(null);
+    };
+  }
+
+  function renderHistory() {
+    const commits = data.commits || [];
+    if (!commits.length) {
+      body.innerHTML = '<div class="git-empty">Nenhum commit.</div>';
+      return;
+    }
+    body.innerHTML = '';
+    commits.forEach((c) => {
+      const row = document.createElement('div');
+      row.className = 'git-history-row';
+      row.innerHTML = `
+        <div><span class="gh-hash">${c.hash}</span><span class="gh-msg">${c.message || ''}</span></div>
+        <div class="gh-meta">${c.author || ''} · ${c.when || ''}</div>`;
+      body.appendChild(row);
+    });
+  }
+
+  function showTab(name) {
+    overlay.querySelectorAll('.git-panel-tabs button').forEach((b) => {
+      b.classList.toggle('active', b.dataset.gtab === name);
+    });
+    if (name === 'history') renderHistory();
+    else renderChanges();
+  }
+
+  overlay.querySelectorAll('.git-panel-tabs button').forEach((b) => {
+    b.onclick = () => showTab(b.dataset.gtab);
+  });
+  showTab(activeTab);
+}
+
+document.getElementById('btnGitPanel')?.addEventListener('click', () => openGitPanel('changes'));
+document.getElementById('gitBranchBadge')?.addEventListener('click', () => openGitPanel('changes'));
 
 // ========== GIT DIFF (Monaco DiffEditor) ==========
 let diffEditor = null;
@@ -965,11 +1198,11 @@ document.getElementById('btnGitDiff').onclick = () => {
   openGitDiff(currentFile || null);
 };
 
-// Escape fecha o diff
+// Escape fecha diff / painel git
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.getElementById('diffOverlay')) {
-    closeDiffOverlay();
-  }
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('diffOverlay')) closeDiffOverlay();
+  if (document.getElementById('gitOverlay')) closeGitPanel();
 });
 
 // ========== SHELL (xterm) + TABS ==========
