@@ -96,6 +96,27 @@ function showLoginGate(msg) {
   gate.style.display = 'flex';
 }
 
+function logout() {
+  setAuthToken('');
+  openTabs = [];
+  currentFile = null;
+  showLoginGate('Sessão encerrada. Entre de novo.');
+}
+
+// Botão Sair no sheet de config (se existir) + atalho
+document.addEventListener('DOMContentLoaded', () => {
+  const sheet = document.getElementById('moreMenu');
+  if (sheet && !document.getElementById('btnLogout')) {
+    const b = document.createElement('button');
+    b.id = 'btnLogout';
+    b.className = 'btn';
+    b.textContent = '🚪 Sair';
+    b.onclick = () => { closeSheet(); logout(); };
+    const cfg = sheet.querySelector('.sheet-section:last-of-type') || sheet;
+    cfg.appendChild(b);
+  }
+});
+
 // Verifica se auth é necessária
 fetch('/api/auth/status')
   .then((r) => r.json())
