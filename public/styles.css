@@ -122,6 +122,16 @@ body {
   background: #4a3600;
 }
 
+.btn-keys {
+  background: #1a2a3a;
+  border-color: #1e4a6a;
+  color: #7dd3fc;
+}
+
+.btn-keys:hover {
+  background: #1e3a4a;
+}
+
 .btn-stop {
   background: #3a1515;
   border-color: #7f1d1d;

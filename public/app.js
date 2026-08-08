@@ -444,6 +444,13 @@ shellInput.addEventListener('keydown', (e) => {
   }
 });
 
+// ========== API KEYS (.env) ==========
+document.getElementById('btnApiKeys').onclick = () => {
+  openFile('.env');
+  appendConsole('info', 'Arquivo .env aberto. Edite as keys e salve (Ctrl+S).');
+  appendConsole('info', 'Depois reinicie o container: no Shell digite → docker compose restart app');
+};
+
 // ========== LOGS AO VIVO ==========
 let logEventSource = null;
 
@@ -454,28 +461,28 @@ function stopLogStream() {
   }
   fetch('/api/logs/stop', { method: 'POST' }).catch(() => {});
   document.getElementById('btnLogs').style.display = '';
+  document.getElementById('btnLogsAll').style.display = '';
   document.getElementById('btnStopLogs').style.display = 'none';
   appendConsole('info', '── Stream de logs parado ──');
 }
 
 document.getElementById('btnStopLogs').onclick = stopLogStream;
 
-document.getElementById('btnLogs').onclick = () => {
-  // Troca para aba Console (onde os logs aparecem)
+function startLogStream(mode) {
   document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.remove('active'));
   const consoleTab = document.querySelector('.console-tabs .tab[data-tab="console"]');
   if (consoleTab) consoleTab.classList.add('active');
   shellInputArea.style.display = 'none';
 
-  // Se já tiver stream, para antes
   if (logEventSource) stopLogStream();
 
   document.getElementById('btnLogs').style.display = 'none';
+  document.getElementById('btnLogsAll').style.display = 'none';
   document.getElementById('btnStopLogs').style.display = '';
 
-  appendConsole('info', '── Conectando logs ao vivo... ──');
+  appendConsole('info', `── Conectando logs ao vivo (${mode})... ──`);
 
-  logEventSource = new EventSource('/api/logs/stream');
+  logEventSource = new EventSource(`/api/logs/stream?mode=${mode}`);
 
   logEventSource.onmessage = (event) => {
     try {
@@ -494,4 +501,7 @@ document.getElementById('btnLogs').onclick = () => {
     appendConsole('stderr', 'Conexão de logs interrompida');
     stopLogStream();
   };
-};
+}
+
+document.getElementById('btnLogs').onclick = () => startLogStream('app');
+document.getElementById('btnLogsAll').onclick = () => startLogStream('all');

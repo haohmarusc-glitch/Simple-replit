@@ -31,7 +31,21 @@ const IGNORE = new Set([
   '.DS_Store',
   'pnpm-lock.yaml',
   'package-lock.json',
-  'yarn.lock'
+  'yarn.lock',
+  '.agents',
+  '.claude',
+  '.github',
+  '.docker'
+]);
+
+// Arquivos ocultos permitidos (API keys, config)
+const ALLOWED_DOTFILES = new Set([
+  '.env',
+  '.env.example',
+  '.env.local',
+  '.gitignore',
+  '.npmrc',
+  '.dockerignore'
 ]);
 
 // Garante que a pasta workspace existe (só se for a pasta padrão)
@@ -65,7 +79,9 @@ function listFiles(dir, base = '', depth = 0) {
   }
 
   for (const entry of entries) {
-    if (IGNORE.has(entry.name) || entry.name.startsWith('.')) continue;
+    if (IGNORE.has(entry.name)) continue;
+    // Ignora dotfiles/dirs, exceto os permitidos (.env etc)
+    if (entry.name.startsWith('.') && !ALLOWED_DOTFILES.has(entry.name)) continue;
 
     const relative = path.join(base, entry.name);
     const full = path.join(dir, entry.name);
@@ -316,15 +332,30 @@ app.get('/api/logs/stream', (req, res) => {
     res.write(`data: ${JSON.stringify({ type, text })}\n\n`);
   };
 
-  send('info', '── Iniciando stream de logs ──');
+  const mode = req.query.mode || 'app'; // app | all | panel
+  send('info', `── Logs ao vivo (${mode}) ──`);
 
-  // Tenta descobrir o melhor comando de log disponível
-  const tryCommands = [
-    ['docker', ['compose', 'logs', '-f', '--tail', '50']],
-    ['docker-compose', ['logs', '-f', '--tail', '50']],
-    ['pm2', ['logs', '--lines', '50']],
-    ['journalctl', ['-f', '-n', '50', '--no-pager']]
-  ];
+  // Comandos priorizados para o Premercado
+  let tryCommands;
+  if (mode === 'panel') {
+    tryCommands = [
+      ['docker', ['logs', '-f', '--tail', '80', 'deploy-panel-panel-1']],
+      ['docker', ['compose', '-f', '/opt/deploy-panel/docker-compose.yml', 'logs', '-f', '--tail', '50']]
+    ];
+  } else if (mode === 'all') {
+    tryCommands = [
+      ['docker', ['compose', 'logs', '-f', '--tail', '40']],
+      ['docker-compose', ['logs', '-f', '--tail', '40']]
+    ];
+  } else {
+    // workflow / app (padrão) — container do agente Premercado
+    tryCommands = [
+      ['docker', ['logs', '-f', '--tail', '100', 'premercado-app-1']],
+      ['docker', ['compose', 'logs', '-f', '--tail', '80', 'app']],
+      ['docker-compose', ['logs', '-f', '--tail', '80', 'app']],
+      ['pm2', ['logs', '--lines', '50']]
+    ];
+  }
 
   function startNext(index) {
     if (index >= tryCommands.length) {
