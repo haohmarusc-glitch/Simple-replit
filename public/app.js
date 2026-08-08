@@ -1761,19 +1761,20 @@ document.getElementById('btnRestartApp').onclick = async () => {
   }
 };
 
-// ========== AI CHAT ==========
+// ========== AI CHAT + PAINEL AGENTE ==========
 const aiMessages = [];
 const aiMessagesEl = document.getElementById('aiMessages');
 const aiInput = document.getElementById('aiInput');
 
 function addAiMessage(role, content, files) {
+  if (!aiMessagesEl) return;
   const div = document.createElement('div');
   div.className = `ai-msg ${role}`;
   div.textContent = content;
   if (files && files.length) {
     const actions = document.createElement('div');
     actions.className = 'file-actions';
-    files.forEach(f => {
+    files.forEach((f) => {
       const btn = document.createElement('button');
       btn.textContent = `💾 Salvar ${f.path}`;
       btn.onclick = async () => {
@@ -1781,7 +1782,7 @@ function addAiMessage(role, content, files) {
           const res = await apiFetch('/api/file', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: f.path, content: f.content })
+            body: JSON.stringify({ path: f.path, content: f.content }),
           });
           const data = await res.json();
           if (data.success) {
@@ -1789,9 +1790,7 @@ function addAiMessage(role, content, files) {
             btn.style.background = '#14532d';
             loadFiles();
             if (currentFile === f.path && editor) editor.setValue(f.content);
-          } else {
-            toast(data.error || 'Erro ao salvar', 'error');
-          }
+          } else toast(data.error || 'Erro ao salvar', 'error');
         } catch (e) {
           toast(e.message, 'error');
         }
@@ -1805,33 +1804,32 @@ function addAiMessage(role, content, files) {
 }
 
 async function sendAiMessage(presetText) {
-  const text = (presetText || aiInput.value).trim();
+  const text = (presetText || (aiInput && aiInput.value) || '').trim();
   if (!text) return;
-  if (!presetText) aiInput.value = '';
-
+  if (!presetText && aiInput) aiInput.value = '';
   const btnSend = document.getElementById('btnAiSend');
   if (btnSend) btnSend.disabled = true;
-
   aiMessages.push({ role: 'user', content: text });
   addAiMessage('user', text);
-
   const thinking = document.createElement('div');
   thinking.className = 'ai-msg assistant';
   thinking.textContent = 'Pensando...';
   thinking.id = 'aiThinking';
-  aiMessagesEl.appendChild(thinking);
-  aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
-
+  if (aiMessagesEl) {
+    aiMessagesEl.appendChild(thinking);
+    aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
+  }
   try {
+    const modelEl = document.getElementById('aiModel');
     const res = await apiFetch('/api/ai/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages: aiMessages.slice(-12),
-        model: document.getElementById('aiModel').value,
+        model: modelEl ? modelEl.value : 'deepseek-flash',
         currentFile: currentFile,
-        currentCode: editor ? editor.getValue() : ''
-      })
+        currentCode: editor ? editor.getValue() : '',
+      }),
     });
     const data = await res.json();
     document.getElementById('aiThinking')?.remove();
@@ -1849,22 +1847,164 @@ async function sendAiMessage(presetText) {
   }
 }
 
-document.getElementById('btnAiSend').onclick = () => sendAiMessage();
-aiInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendAiMessage();
-  }
-});
-
-document.querySelectorAll('.ai-chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    sendAiMessage(chip.dataset.prompt);
+if (document.getElementById('btnAiSend')) {
+  document.getElementById('btnAiSend').onclick = () => sendAiMessage();
+}
+if (aiInput) {
+  aiInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendAiMessage();
+    }
   });
+}
+document.querySelectorAll('.ai-chip').forEach((chip) => {
+  chip.addEventListener('click', () => sendAiMessage(chip.dataset.prompt));
 });
 
-// Status das keys no load
-fetch('/api/ai/status').then(r => r.json()).then(s => {
+const agentMessages = [];
+
+function closeAiPanel() {
+  document.getElementById('aiOverlay')?.remove();
+}
+
+function openAiPanel() {
+  if (typeof closeSheet === 'function') closeSheet();
+  closeAiPanel();
+  const overlay = document.createElement('div');
+  overlay.id = 'aiOverlay';
+  overlay.className = 'ai-overlay';
+  overlay.innerHTML = `
+    <div class="ai-workspace">
+      <div class="ai-ws-header">
+        <h3>✦ Assistente AI · agente com acesso ao workspace</h3>
+        <div class="ai-ws-actions">
+          <label class="ai-agent-toggle"><input type="checkbox" id="aiAgentMode" checked /> Agente (fazer ações)</label>
+          <select id="aiPanelModel">
+            <option value="deepseek-flash">DeepSeek Flash</option>
+            <option value="deepseek-pro">DeepSeek Pro</option>
+            <option value="groq-fast">Groq Fast</option>
+            <option value="groq-quality">Groq Quality</option>
+          </select>
+          <button type="button" class="btn" id="aiPanelClear">Limpar</button>
+          <button type="button" class="btn" id="aiPanelClose">Fechar</button>
+        </div>
+      </div>
+      <div class="ai-ws-body">
+        <div class="ai-ws-messages" id="aiPanelMessages"></div>
+        <div class="ai-ws-footer">
+          <div class="ai-ws-chips">
+            <button type="button" data-p="Liste a estrutura principal do projeto e diga o que cada pasta faz">Mapear projeto</button>
+            <button type="button" data-p="Mostre o status do git e resuma as alterações">Status git</button>
+            <button type="button" data-p="Crie um arquivo hello_agent.py que imprime Olá do agente e rode ele">Criar e rodar</button>
+            <button type="button" data-p="Explique o arquivo aberto agora">Explicar arquivo</button>
+          </div>
+          <div class="ai-ws-input-row">
+            <textarea id="aiPanelInput" placeholder="Peça para criar, editar, rodar, commit… (modo agente faz de verdade)"></textarea>
+            <button type="button" class="btn btn-primary" id="aiPanelSend">Enviar</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('aiPanelClose').onclick = closeAiPanel;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeAiPanel(); });
+  document.getElementById('aiPanelClear').onclick = () => {
+    agentMessages.length = 0;
+    document.getElementById('aiPanelMessages').innerHTML = '';
+  };
+  const msgBox = document.getElementById('aiPanelMessages');
+  function addPanelMsg(role, content) {
+    const div = document.createElement('div');
+    div.className = 'ai-ws-msg ' + role;
+    div.textContent = content;
+    msgBox.appendChild(div);
+    msgBox.scrollTop = msgBox.scrollHeight;
+  }
+  agentMessages.forEach((m) => addPanelMsg(m.role === 'user' ? 'user' : 'assistant', m.content));
+
+  async function sendAgent(text) {
+    const input = document.getElementById('aiPanelInput');
+    const t = (text || (input && input.value) || '').trim();
+    if (!t) return;
+    if (input) input.value = '';
+    agentMessages.push({ role: 'user', content: t });
+    addPanelMsg('user', t);
+    const agentOn = document.getElementById('aiAgentMode')?.checked !== false;
+    const model = document.getElementById('aiPanelModel')?.value || 'deepseek-flash';
+    const thinking = document.createElement('div');
+    thinking.className = 'ai-ws-msg assistant';
+    thinking.id = 'aiPanelThinking';
+    thinking.textContent = agentOn ? 'Agente trabalhando (arquivos/git/shell)…' : 'Pensando…';
+    msgBox.appendChild(thinking);
+    msgBox.scrollTop = msgBox.scrollHeight;
+    const endpoint = agentOn ? '/api/ai/agent' : '/api/ai/chat';
+    try {
+      const res = await apiFetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: agentMessages.slice(-16),
+          model,
+          currentFile,
+          currentCode: editor ? editor.getValue() : '',
+        }),
+      });
+      const data = await res.json();
+      document.getElementById('aiPanelThinking')?.remove();
+      if (!data.success) {
+        addPanelMsg('assistant', 'Erro: ' + (data.error || 'falha'));
+        return;
+      }
+      if (data.trace && data.trace.length) {
+        data.trace.forEach((tr) => {
+          const ok = tr.result && tr.result.ok !== false;
+          addPanelMsg('tool', `${ok ? '✔' : '✖'} ${tr.tool}(${JSON.stringify(tr.args || {}).slice(0, 120)})`);
+        });
+        loadFiles();
+        if (typeof refreshGitBadge === 'function') refreshGitBadge();
+      }
+      const content = data.content || '(sem texto)';
+      agentMessages.push({ role: 'assistant', content });
+      addPanelMsg('assistant', content);
+      if (data.files && data.files.length) {
+        for (const f of data.files) {
+          try {
+            await apiFetch('/api/file', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: f.path, content: f.content }),
+            });
+            addPanelMsg('tool', `✔ salvo ${f.path}`);
+            loadFiles();
+          } catch (_) {}
+        }
+      }
+    } catch (err) {
+      document.getElementById('aiPanelThinking')?.remove();
+      addPanelMsg('assistant', 'Erro: ' + err.message);
+    }
+  }
+
+  document.getElementById('aiPanelSend').onclick = () => sendAgent();
+  document.getElementById('aiPanelInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendAgent();
+    }
+  });
+  overlay.querySelectorAll('.ai-ws-chips button').forEach((b) => {
+    b.onclick = () => sendAgent(b.dataset.p);
+  });
+}
+
+document.getElementById('btnAiPanel')?.addEventListener('click', openAiPanel);
+document.getElementById('btnAiTop')?.addEventListener('click', openAiPanel);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('aiOverlay')) closeAiPanel();
+});
+
+fetch('/api/ai/status').then((r) => r.json()).then((s) => {
   if (!s.groq && !s.deepseek) {
     console.warn('Nenhuma API key de IA configurada (GROQ_API_KEY / DEEPSEEK_API_KEY)');
   }

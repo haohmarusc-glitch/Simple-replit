@@ -1356,5 +1356,243 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 });
 
+// ========== AI AGENT (ferramentas = poder do app) ==========
+const AGENT_TOOLS = [
+  { type: 'function', function: { name: 'list_files', description: 'Lista arquivos do workspace', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'read_file', description: 'Lê arquivo do workspace', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+  { type: 'function', function: { name: 'write_file', description: 'Cria/edita arquivo', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
+  { type: 'function', function: { name: 'delete_path', description: 'Apaga arquivo ou pasta', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+  { type: 'function', function: { name: 'run_code', description: 'Executa python ou javascript', parameters: { type: 'object', properties: { language: { type: 'string' }, code: { type: 'string' } }, required: ['language', 'code'] } } },
+  { type: 'function', function: { name: 'shell', description: 'Comando shell (whitelist)', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } },
+  { type: 'function', function: { name: 'git_summary', description: 'Status e log git', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'git_diff', description: 'git diff', parameters: { type: 'object', properties: { path: { type: 'string' } } } } },
+  { type: 'function', function: { name: 'git_commit', description: 'add -A + commit', parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } } },
+  { type: 'function', function: { name: 'git_pull', description: 'git pull --ff-only', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'git_push', description: 'git push', parameters: { type: 'object', properties: {} } } },
+];
+
+const AGENT_SYSTEM = `Você é o agente do Simple Replit na VPS.
+Responda em português. Se o usuário pedir para FAZER algo, USE as ferramentas (não só explique).
+- Leia arquivos antes de editar.
+- Não exponha secrets completos na resposta final.
+- git_push/delete só se o usuário pediu explicitamente.
+- No final, resuma o que fez.`;
+
+function flattenTree(items, acc = []) {
+  for (const it of items || []) {
+    acc.push({ path: it.path, type: it.type });
+    if (it.children) flattenTree(it.children, acc);
+  }
+  return acc;
+}
+
+async function runAgentTool(name, args) {
+  const a = args || {};
+  try {
+    switch (name) {
+      case 'list_files': {
+        const flat = flattenTree(listFiles(WORKSPACE)).slice(0, 400);
+        return { ok: true, count: flat.length, files: flat };
+      }
+      case 'read_file': {
+        const full = getSafePath(a.path);
+        if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return { ok: false, error: 'não encontrado' };
+        const content = fs.readFileSync(full, 'utf8');
+        return { ok: true, path: a.path, content: content.slice(0, 120000), truncated: content.length > 120000 };
+      }
+      case 'write_file': {
+        const full = getSafePath(a.path);
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        fs.writeFileSync(full, String(a.content ?? ''), 'utf8');
+        return { ok: true, path: a.path, bytes: Buffer.byteLength(String(a.content ?? ''), 'utf8') };
+      }
+      case 'delete_path': {
+        const full = getSafePath(a.path);
+        if (!fs.existsSync(full)) return { ok: false, error: 'não existe' };
+        fs.rmSync(full, { recursive: true, force: true });
+        return { ok: true, deleted: a.path };
+      }
+      case 'run_code': {
+        const lang = (a.language === 'javascript' || a.language === 'js') ? 'js' : 'py';
+        const id = uuidv4().slice(0, 8);
+        const tempDir = path.join(WORKSPACE, '.temp');
+        fs.mkdirSync(tempDir, { recursive: true });
+        const tempFile = path.join(tempDir, `${id}.${lang}`);
+        fs.writeFileSync(tempFile, String(a.code || ''), 'utf8');
+        const bin = lang === 'js' ? 'node' : 'python3';
+        return await new Promise((resolve) => {
+          const child = spawn(bin, [tempFile], {
+            cwd: WORKSPACE, shell: false,
+            env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: WORKSPACE, LANG: 'C.UTF-8' },
+          });
+          let stdout = '', stderr = '';
+          const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 15000);
+          child.stdout.on('data', (d) => { stdout += d.toString(); });
+          child.stderr.on('data', (d) => { stderr += d.toString(); });
+          child.on('close', (code) => {
+            clearTimeout(t);
+            try { fs.unlinkSync(tempFile); } catch (_) {}
+            resolve({ ok: code === 0, stdout: stdout.slice(0, 12000), stderr: stderr.slice(0, 4000), code });
+          });
+          child.on('error', (e) => {
+            clearTimeout(t);
+            try { fs.unlinkSync(tempFile); } catch (_) {}
+            resolve({ ok: false, error: e.message });
+          });
+        });
+      }
+      case 'shell': {
+        const cmd = String(a.command || '').trim();
+        if (!cmd) return { ok: false, error: 'vazio' };
+        for (const re of BLOCKED_PATTERNS) {
+          if (re.test(cmd)) return { ok: false, error: 'bloqueado' };
+        }
+        if (!SHELL_OPEN) {
+          const first = shellFirstToken(cmd);
+          const base = path.basename(first);
+          if (!SHELL_WHITELIST.has(base) && !SHELL_WHITELIST.has(first)) {
+            return { ok: false, error: 'não permitido: ' + base };
+          }
+          if (/[;&`]|\$\(|<\(/.test(cmd) && !cmd.startsWith('git ')) {
+            return { ok: false, error: 'operadores bloqueados' };
+          }
+        }
+        return await new Promise((resolve) => {
+          exec(cmd, { cwd: WORKSPACE, timeout: 30000, maxBuffer: 2 * 1024 * 1024, shell: '/bin/bash' },
+            (error, stdout, stderr) => {
+              resolve({
+                ok: !error,
+                stdout: (stdout || '').slice(0, 15000),
+                stderr: (stderr || '').slice(0, 5000),
+              });
+            });
+        });
+      }
+      case 'git_summary': {
+        const [b, s, l] = await Promise.all([
+          runGitAsync(['rev-parse', '--abbrev-ref', 'HEAD']),
+          runGitAsync(['status', '--porcelain', '-b']),
+          runGitAsync(['log', '-8', '--oneline']),
+        ]);
+        return { ok: true, branch: b.output, status: s.output, log: l.output };
+      }
+      case 'git_diff': {
+        const r = await runGitAsync(a.path ? ['diff', '--', a.path] : ['diff']);
+        return { ok: r.success, output: (r.output || '').slice(0, 20000), error: r.error };
+      }
+      case 'git_commit': {
+        const msg = String(a.message || '').trim();
+        if (!msg) return { ok: false, error: 'mensagem obrigatória' };
+        const addR = await runGitAsync(['add', '-A']);
+        if (!addR.success) return { ok: false, error: addR.error };
+        const cR = await runGitAsync(['commit', '-m', msg]);
+        return { ok: cR.success, output: cR.output, error: cR.error };
+      }
+      case 'git_pull': {
+        const r = await runGitAsync(['pull', '--ff-only']);
+        return { ok: r.success, output: r.output, error: r.error };
+      }
+      case 'git_push': {
+        const r = await runGitAsync(['push']);
+        return { ok: r.success, output: r.output, error: r.error };
+      }
+      default:
+        return { ok: false, error: 'unknown tool ' + name };
+    }
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function callLlm(cfg, apiKey, messages, tools) {
+  const payload = { model: cfg.model, messages, temperature: 0.2, max_tokens: 4096 };
+  if (tools) {
+    payload.tools = tools;
+    payload.tool_choice = 'auto';
+  }
+  const r = await fetch(cfg.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(payload),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    throw new Error(data.error?.message || data.message || JSON.stringify(data).slice(0, 400));
+  }
+  return data;
+}
+
+app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
+  try {
+    const { messages, model: modelKey, currentFile, currentCode } = req.body || {};
+    if (!messages || !Array.isArray(messages) || !messages.length) {
+      return res.status(400).json({ success: false, error: 'messages obrigatório' });
+    }
+
+    let key = modelKey && AI_MODELS[modelKey] ? modelKey : 'deepseek-flash';
+    const keys = loadEnvKeys();
+    if (!keys.GROQ_API_KEY && String(key).startsWith('groq')) key = 'deepseek-flash';
+    if (!keys.DEEPSEEK_API_KEY && String(key).startsWith('deepseek') && keys.GROQ_API_KEY) key = 'groq-fast';
+
+    const cfg = AI_MODELS[key];
+    const apiKey = cfg.provider === 'groq' ? keys.GROQ_API_KEY : keys.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+      return res.status(400).json({ success: false, error: 'Sem GROQ_API_KEY / DEEPSEEK_API_KEY no .env' });
+    }
+
+    const systemContent = AGENT_SYSTEM +
+      `\nWorkspace: ${WORKSPACE}` +
+      (currentFile ? `\nArquivo aberto: ${currentFile}` : '') +
+      (currentCode ? `\nTrecho editor:\n\`\`\`\n${String(currentCode).slice(0, 6000)}\n\`\`\`` : '');
+
+    const llmMessages = [
+      { role: 'system', content: systemContent },
+      ...messages.slice(-16).map((m) => ({ role: m.role, content: m.content })),
+    ];
+
+    const trace = [];
+    let finalContent = '';
+    let usedTools = false;
+
+    for (let round = 0; round < 8; round++) {
+      let data;
+      try {
+        data = await callLlm(cfg, apiKey, llmMessages, AGENT_TOOLS);
+      } catch (e) {
+        if (round === 0) data = await callLlm(cfg, apiKey, llmMessages, null);
+        else throw e;
+      }
+
+      const msg = data.choices?.[0]?.message || {};
+      const toolCalls = msg.tool_calls;
+      if (toolCalls && toolCalls.length) {
+        usedTools = true;
+        llmMessages.push({ role: 'assistant', content: msg.content || null, tool_calls: toolCalls });
+        for (const tc of toolCalls) {
+          const fn = tc.function || {};
+          let args = {};
+          try { args = JSON.parse(fn.arguments || '{}'); } catch (_) {}
+          const result = await runAgentTool(fn.name, args);
+          trace.push({ tool: fn.name, args, result });
+          llmMessages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify(result).slice(0, 20000),
+          });
+        }
+        continue;
+      }
+      finalContent = msg.content || '';
+      break;
+    }
+
+    if (!finalContent && usedTools) finalContent = 'Ações executadas.';
+
+    res.json({ success: true, content: finalContent, trace, model: key, agent: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Fallback SPA
 };
