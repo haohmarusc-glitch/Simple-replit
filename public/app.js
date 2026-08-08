@@ -3,6 +3,27 @@ let editor = null;
 let currentFile = null;
 let currentLanguage = 'python';
 let files = [];
+let autoSaveTimer = null;
+let dirty = false;
+
+// ========== TOAST ==========
+function toast(msg, type = 'info') {
+  let wrap = document.getElementById('toastWrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'toastWrap';
+    document.body.appendChild(wrap);
+  }
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  wrap.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 250);
+  }, 2800);
+}
 
 // ========== AUTH ==========
 const AUTH_KEY = 'sr_auth_token';
@@ -113,6 +134,20 @@ require(['vs/editor/editor.main'], function () {
     runCode();
   });
 
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, () => {
+    openFilePalette();
+  });
+
+  // Auto-save (2s após parar de digitar)
+  editor.onDidChangeModelContent(() => {
+    if (!currentFile) return;
+    dirty = true;
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+      if (dirty && currentFile) saveCurrentFile();
+    }, 2000);
+  });
+
   // Carrega arquivos ao iniciar
   loadFiles();
 });
@@ -215,7 +250,7 @@ async function openFile(filePath) {
     const res = await apiFetch(`/api/file?path=${encodeURIComponent(filePath)}`);
     const data = await res.json();
     if (!data.success) {
-      alert('Erro: ' + data.error);
+      toast('Erro: ' + data.error, 'error');
       return;
     }
 
@@ -239,7 +274,7 @@ async function openFile(filePath) {
 
     renderFileTree();
   } catch (err) {
-    alert('Erro ao abrir arquivo: ' + err.message);
+    toast('Erro ao abrir: ' + err.message, 'error');
   }
 }
 
@@ -261,13 +296,15 @@ async function saveCurrentFile() {
     });
     const data = await res.json();
     if (data.success) {
+      dirty = false;
+      toast('Salvo: ' + currentFile, 'ok');
       appendConsole('info', `✔ Salvo: ${currentFile}`);
       loadFiles();
     } else {
-      alert('Erro ao salvar: ' + data.error);
+      toast('Erro ao salvar: ' + data.error, 'error');
     }
   } catch (err) {
-    alert('Erro ao salvar: ' + err.message);
+    toast('Erro ao salvar: ' + err.message, 'error');
   }
 }
 
@@ -287,10 +324,10 @@ document.getElementById('btnNewFile').onclick = async () => {
       await loadFiles();
       openFile(name);
     } else {
-      alert(data.error);
+      toast(data.error || 'Erro', 'error');
     }
   } catch (err) {
-    alert(err.message);
+    toast(err.message, 'error');
   }
 };
 
@@ -308,10 +345,10 @@ document.getElementById('btnNewFolder').onclick = async () => {
     if (data.success) {
       loadFiles();
     } else {
-      alert(data.error);
+      toast(data.error || 'Erro', 'error');
     }
   } catch (err) {
-    alert(err.message);
+    toast(err.message, 'error');
   }
 };
 
@@ -348,10 +385,10 @@ async function renameItem(oldPath, newName) {
       if (currentFile === oldPath) currentFile = newPath;
       loadFiles();
     } else {
-      alert(data.error);
+      toast(data.error || 'Erro', 'error');
     }
   } catch (err) {
-    alert(err.message);
+    toast(err.message, 'error');
   }
 }
 
@@ -368,10 +405,10 @@ async function deleteItem(filePath) {
       }
       loadFiles();
     } else {
-      alert(data.error);
+      toast(data.error || 'Erro', 'error');
     }
   } catch (err) {
-    alert(err.message);
+    toast(err.message, 'error');
   }
 }
 
@@ -736,10 +773,10 @@ function addAiMessage(role, content, files) {
             loadFiles();
             if (currentFile === f.path && editor) editor.setValue(f.content);
           } else {
-            alert(data.error || 'Erro ao salvar');
+            toast(data.error || 'Erro ao salvar', 'error');
           }
         } catch (e) {
-          alert(e.message);
+          toast(e.message, 'error');
         }
       };
       actions.appendChild(btn);
@@ -1040,3 +1077,93 @@ setMobileView = function(view) {
   }
   _setMobileView(view);
 };
+
+// ========== FILE PALETTE (Ctrl+P) ==========
+function flattenFiles(items, out = []) {
+  for (const it of items || []) {
+    if (it.type === 'file') out.push(it.path);
+    else if (it.children) flattenFiles(it.children, out);
+  }
+  return out;
+}
+
+function openFilePalette() {
+  let modal = document.getElementById('filePalette');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'filePalette';
+    modal.innerHTML = `
+      <div class="palette-box">
+        <input id="paletteInput" type="text" placeholder="Buscar arquivo… (Esc fecha)" autocomplete="off" />
+        <ul id="paletteList"></ul>
+      </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeFilePalette();
+    });
+    document.getElementById('paletteInput').addEventListener('input', renderPaletteList);
+    document.getElementById('paletteInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeFilePalette();
+      if (e.key === 'Enter') {
+        const first = document.querySelector('#paletteList li.active, #paletteList li');
+        if (first) first.click();
+      }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const items = [...document.querySelectorAll('#paletteList li')];
+        if (!items.length) return;
+        let i = items.findIndex((x) => x.classList.contains('active'));
+        items.forEach((x) => x.classList.remove('active'));
+        if (e.key === 'ArrowDown') i = Math.min(items.length - 1, i + 1);
+        else i = Math.max(0, i <= 0 ? items.length - 1 : i - 1);
+        items[i].classList.add('active');
+        items[i].scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }
+  modal.style.display = 'flex';
+  const input = document.getElementById('paletteInput');
+  input.value = '';
+  renderPaletteList();
+  setTimeout(() => input.focus(), 50);
+}
+
+function closeFilePalette() {
+  const modal = document.getElementById('filePalette');
+  if (modal) modal.style.display = 'none';
+}
+
+function renderPaletteList() {
+  const q = (document.getElementById('paletteInput')?.value || '').toLowerCase().trim();
+  const all = flattenFiles(files);
+  const filtered = q
+    ? all.filter((p) => p.toLowerCase().includes(q)).slice(0, 40)
+    : all.slice(0, 40);
+  const ul = document.getElementById('paletteList');
+  if (!ul) return;
+  ul.innerHTML = '';
+  filtered.forEach((p, idx) => {
+    const li = document.createElement('li');
+    if (idx === 0) li.classList.add('active');
+    li.textContent = p;
+    li.onclick = () => {
+      closeFilePalette();
+      openFile(p);
+    };
+    ul.appendChild(li);
+  });
+  if (!filtered.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = 'Nenhum arquivo';
+    ul.appendChild(li);
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+    e.preventDefault();
+    openFilePalette();
+  }
+  if (e.key === 'Escape') closeFilePalette();
+});
