@@ -548,3 +548,68 @@ function startLogStream(mode) {
 
 document.getElementById('btnLogs').onclick = () => startLogStream('app');
 document.getElementById('btnLogsAll').onclick = () => startLogStream('all');
+
+// ========== MONITOR ==========
+document.getElementById('btnMonitor').onclick = async () => {
+  appendConsole('info', '── Monitor ──');
+  try {
+    const res = await fetch('/api/monitor');
+    const data = await res.json();
+    if (data.uptime) appendConsole('stdout', 'Uptime: ' + data.uptime);
+    if (data.memory) appendConsole('stdout', data.memory);
+    if (data.disk) appendConsole('stdout', 'Disk: ' + data.disk);
+    if (data.docker) appendConsole('stdout', data.docker);
+    if (data.pm2 && !data.pm2.includes('indisponivel')) {
+      try {
+        const list = JSON.parse(data.pm2);
+        const summary = (Array.isArray(list) ? list : []).map(p =>
+          `${p.name}: ${p.pm2_env?.status || '?'} (cpu ${p.monit?.cpu ?? '?'}% mem ${Math.round((p.monit?.memory || 0) / 1024 / 1024)}MB)`
+        ).join('\n');
+        if (summary) appendConsole('stdout', 'PM2:\n' + summary);
+      } catch (e) {
+        appendConsole('stdout', 'PM2: ' + data.pm2.slice(0, 300));
+      }
+    }
+  } catch (err) {
+    appendConsole('stderr', 'Erro monitor: ' + err.message);
+  }
+};
+
+// ========== SECRETS LIST ==========
+document.getElementById('btnSecrets').onclick = async () => {
+  appendConsole('info', '── Secrets (.env) ──');
+  try {
+    const res = await fetch('/api/secrets');
+    const data = await res.json();
+    if (!data.success) {
+      appendConsole('stderr', data.error || 'Falha');
+      return;
+    }
+    data.keys.forEach(k => {
+      const status = k.set ? `set ${k.preview}` : 'VAZIO';
+      appendConsole(k.set ? 'stdout' : 'stderr', `${k.name}=${status}`);
+    });
+    appendConsole('info', `${data.keys.length} keys | clique 🔑 API Keys para editar`);
+  } catch (err) {
+    appendConsole('stderr', 'Erro secrets: ' + err.message);
+  }
+};
+
+// ========== RESTART APP ==========
+document.getElementById('btnRestartApp').onclick = async () => {
+  if (!confirm('Reiniciar o container do app (docker compose restart app)?')) return;
+  appendConsole('info', '── Restart app ──');
+  try {
+    const res = await fetch('/api/workflow', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'restart-app' })
+    });
+    const data = await res.json();
+    if (data.output) appendConsole('stdout', data.output);
+    if (data.error) appendConsole('stderr', data.error);
+    appendConsole(data.success ? 'info' : 'stderr', data.success ? '✔ App reiniciado' : 'Falha no restart');
+  } catch (err) {
+    appendConsole('stderr', 'Erro: ' + err.message);
+  }
+};

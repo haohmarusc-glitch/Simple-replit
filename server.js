@@ -563,6 +563,85 @@ app.get('/api/info', (req, res) => {
   });
 });
 
+// ========== MONITORING ==========
+app.get('/api/monitor', (req, res) => {
+  const cmds = {
+    uptime: 'uptime',
+    memory: "free -h | head -2",
+    disk: "df -h / | tail -1",
+    docker: "docker ps --format 'table {{.Names}}\\t{{.Status}}\\t{{.Ports}}' 2>/dev/null || echo 'docker indisponivel'",
+    pm2: "pm2 jlist 2>/dev/null | head -c 2000 || echo 'pm2 indisponivel'"
+  };
+
+  const results = {};
+  let pending = Object.keys(cmds).length;
+
+  Object.entries(cmds).forEach(([key, cmd]) => {
+    exec(cmd, { timeout: 8000, maxBuffer: 512 * 1024, shell: '/bin/bash' }, (err, stdout, stderr) => {
+      results[key] = (stdout || stderr || (err && err.message) || '').trim();
+      pending--;
+      if (pending === 0) {
+        res.json({ success: true, ...results, workspace: WORKSPACE });
+      }
+    });
+  });
+});
+
+// ========== SECRETS (lista keys do .env sem valores) ==========
+app.get('/api/secrets', (req, res) => {
+  try {
+    const envPath = path.join(WORKSPACE, '.env');
+    if (!fs.existsSync(envPath)) {
+      return res.json({ success: false, error: '.env não encontrado', keys: [] });
+    }
+    const content = fs.readFileSync(envPath, 'utf8');
+    const keys = [];
+    for (const line of content.split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const eq = t.indexOf('=');
+      if (eq === -1) continue;
+      const name = t.slice(0, eq).trim();
+      const val = t.slice(eq + 1).trim();
+      const set = val.length > 0 && val !== '""' && val !== "''";
+      keys.push({ name, set, preview: set ? (val.length > 4 ? val.slice(0, 3) + '***' : '***') : '(vazio)' });
+    }
+    res.json({ success: true, keys, path: '.env' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ========== WORKFLOWS (ações rápidas) ==========
+app.post('/api/workflow', (req, res) => {
+  const { action } = req.body || {};
+  const map = {
+    'restart-app': 'docker compose restart app',
+    'restart-all': 'docker compose restart',
+    'status': 'docker compose ps',
+    'db-status': "docker exec premercado-db-1 pg_isready -U premercado 2>/dev/null || docker exec premercado-db-1 pg_isready 2>/dev/null || echo 'db check failed'",
+    'health': "curl -sS -o /dev/null -w '%{http_code}' -H 'Host: premercadosc.com' http://127.0.0.1/api/healthz || echo fail"
+  };
+
+  if (!action || !map[action]) {
+    return res.status(400).json({ success: false, error: 'Ação inválida', allowed: Object.keys(map) });
+  }
+
+  exec(map[action], {
+    cwd: WORKSPACE,
+    timeout: 60000,
+    maxBuffer: 2 * 1024 * 1024,
+    shell: '/bin/bash'
+  }, (error, stdout, stderr) => {
+    res.json({
+      success: !error,
+      action,
+      output: (stdout || '').trim(),
+      error: (stderr || (error ? error.message : '')).trim()
+    });
+  });
+});
+
 // Fallback SPA
 app.get('*', (req, res) => {
   res.sendFile(path.join(PUBLIC, 'index.html'));
