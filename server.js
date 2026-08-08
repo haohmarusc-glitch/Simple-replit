@@ -317,6 +317,72 @@ app.post('/api/shell', (req, res) => {
   });
 });
 
+// ========== DEPLOY ==========
+// git pull + docker compose up -d --build (stream SSE)
+app.get('/api/deploy/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (type, text) => {
+    res.write(`data: ${JSON.stringify({ type, text })}\n\n`);
+  };
+
+  send('info', '── Deploy iniciado ──');
+
+  const steps = [
+    { label: '1/3 git pull', cmd: 'git', args: ['pull', '--ff-only'] },
+    { label: '2/3 docker compose up -d --build', cmd: 'docker', args: ['compose', 'up', '-d', '--build'] },
+    { label: '3/3 docker compose ps', cmd: 'docker', args: ['compose', 'ps'] }
+  ];
+
+  let stepIndex = 0;
+
+  function runStep() {
+    if (stepIndex >= steps.length) {
+      send('info', '── Deploy concluído ──');
+      res.write('data: {"type":"done"}\n\n');
+      res.end();
+      return;
+    }
+
+    const step = steps[stepIndex];
+    send('info', `▶ ${step.label}`);
+
+    const child = spawn(step.cmd, step.args, {
+      cwd: WORKSPACE,
+      shell: false,
+      env: { ...process.env }
+    });
+
+    child.stdout.on('data', (data) => send('stdout', data.toString()));
+    child.stderr.on('data', (data) => send('stderr', data.toString()));
+
+    child.on('error', (err) => {
+      send('stderr', `Erro ao executar ${step.cmd}: ${err.message}`);
+      stepIndex++;
+      runStep();
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        send('stderr', `⚠ ${step.label} saiu com código ${code}`);
+      } else {
+        send('info', `✔ ${step.label}`);
+      }
+      stepIndex++;
+      runStep();
+    });
+
+    req.on('close', () => {
+      try { child.kill('SIGTERM'); } catch (e) {}
+    });
+  }
+
+  runStep();
+});
+
 // ========== LOGS AO VIVO (SSE) ==========
 // Mantém referência do processo atual para poder parar
 let currentLogProcess = null;

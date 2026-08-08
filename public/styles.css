@@ -132,6 +132,22 @@ body {
   background: #1e3a4a;
 }
 
+.btn-deploy {
+  background: #0f2f1a;
+  border-color: #166534;
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.btn-deploy:hover {
+  background: #14532d;
+}
+
+.btn-deploy:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .btn-stop {
   background: #3a1515;
   border-color: #7f1d1d;

@@ -448,7 +448,50 @@ shellInput.addEventListener('keydown', (e) => {
 document.getElementById('btnApiKeys').onclick = () => {
   openFile('.env');
   appendConsole('info', 'Arquivo .env aberto. Edite as keys e salve (Ctrl+S).');
-  appendConsole('info', 'Depois reinicie o container: no Shell digite → docker compose restart app');
+  appendConsole('info', 'Depois use 🚀 Deploy ou no Shell: docker compose restart app');
+};
+
+// ========== DEPLOY (com log ao vivo) ==========
+document.getElementById('btnDeploy').onclick = () => {
+  if (!confirm('Deploy agora?\n\n1. git pull\n2. docker compose up -d --build\n3. status\n\nO log aparece ao vivo no console.')) {
+    return;
+  }
+
+  document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.remove('active'));
+  const consoleTab = document.querySelector('.console-tabs .tab[data-tab="console"]');
+  if (consoleTab) consoleTab.classList.add('active');
+  if (typeof shellInputArea !== 'undefined') shellInputArea.style.display = 'none';
+
+  const btn = document.getElementById('btnDeploy');
+  btn.disabled = true;
+  btn.textContent = '🚀 Deploying...';
+
+  appendConsole('info', '── Deploy iniciado (log ao vivo) ──');
+
+  const es = new EventSource('/api/deploy/stream');
+
+  es.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'done') {
+        es.close();
+        btn.disabled = false;
+        btn.textContent = '🚀 Deploy';
+        appendConsole('info', '── Deploy finalizado ──');
+        return;
+      }
+      appendConsole(data.type || 'stdout', data.text || '');
+    } catch (e) {
+      appendConsole('stdout', event.data);
+    }
+  };
+
+  es.onerror = () => {
+    es.close();
+    btn.disabled = false;
+    btn.textContent = '🚀 Deploy';
+    appendConsole('stderr', 'Conexão de deploy interrompida (processo pode ter terminado)');
+  };
 };
 
 // ========== LOGS AO VIVO ==========
