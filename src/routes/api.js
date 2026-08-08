@@ -641,6 +641,118 @@ app.get('/api/git/log', (req, res) => {
   runGit(['log', '--oneline', '-10'], (result) => res.json(result));
 });
 
+// Lista arquivos alterados (status porcelain parseado)
+app.get('/api/git/changed', (req, res) => {
+  runGit(['status', '--porcelain'], (result) => {
+    if (!result.success && (result.error || '').includes('not a git repository')) {
+      return res.json({ success: false, error: 'Não é um repositório Git', files: [] });
+    }
+    const files = [];
+    const lines = (result.output || '').split('\n').filter(Boolean);
+    for (const line of lines) {
+      // XY PATH or XY ORIG -> PATH (rename)
+      const code = line.slice(0, 2);
+      let pathPart = line.slice(3);
+      let path = pathPart;
+      let oldPath = null;
+      if (pathPart.includes(' -> ')) {
+        const parts = pathPart.split(' -> ');
+        oldPath = parts[0].replace(/^"|"$/g, '');
+        path = parts[1].replace(/^"|"$/g, '');
+      } else {
+        path = pathPart.replace(/^"|"$/g, '');
+      }
+      const x = code[0];
+      const y = code[1];
+      let status = 'modified';
+      if (x === '?' || y === '?') status = 'untracked';
+      else if (x === 'A' || y === 'A') status = 'added';
+      else if (x === 'D' || y === 'D') status = 'deleted';
+      else if (x === 'R' || y === 'R') status = 'renamed';
+      else if (x === 'M' || y === 'M') status = 'modified';
+      files.push({ path, oldPath, status, code: code.trim() });
+    }
+    res.json({ success: true, files, output: result.output });
+  });
+});
+
+// Diff unificado (todo o repo ou um arquivo)
+app.get('/api/git/diff', (req, res) => {
+  const filePath = (req.query.path || '').trim();
+  if (filePath) {
+    try {
+      getSafePath(filePath); // valida path traversal
+    } catch (err) {
+      return res.status(400).json({ success: false, error: err.message });
+    }
+  }
+  const args = filePath ? ['diff', '--', filePath] : ['diff'];
+  runGit(args, (result) => {
+    // untracked: git diff não mostra — tenta diff contra /dev/null via status
+    if (filePath && result.success && !result.output) {
+      runGit(['status', '--porcelain', '--', filePath], (st) => {
+        const isUntracked = (st.output || '').startsWith('??');
+        if (isUntracked) {
+          try {
+            const full = getSafePath(filePath);
+            if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+              const content = fs.readFileSync(full, 'utf8');
+              if (content.length > 500000) {
+                return res.json({
+                  success: true,
+                  output: `(arquivo novo muito grande para diff)`,
+                  untracked: true,
+                });
+              }
+              const lined = content.split('\n').map((l) => '+' + l).join('\n');
+              return res.json({
+                success: true,
+                output: `--- /dev/null\n+++ b/${filePath}\n${lined}`,
+                untracked: true,
+              });
+            }
+          } catch (_) {}
+        }
+        res.json(result);
+      });
+      return;
+    }
+    res.json(result);
+  });
+});
+
+// Conteúdo do arquivo em um ref (default HEAD) — para Monaco DiffEditor
+app.get('/api/git/show', (req, res) => {
+  const filePath = (req.query.path || '').trim();
+  const ref = ((req.query.ref || 'HEAD') + '').replace(/[^a-zA-Z0-9._\/~^-]/g, '');
+  if (!filePath) {
+    return res.status(400).json({ success: false, error: 'path obrigatório' });
+  }
+  try {
+    getSafePath(filePath);
+  } catch (err) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+  // git show HEAD:path — path não pode começar com /
+  const safeRel = filePath.replace(/^\/+/, '');
+  runGit(['show', `${ref}:${safeRel}`], (result) => {
+    if (!result.success) {
+      // arquivo novo (não existe no HEAD)
+      return res.json({
+        success: true,
+        content: '',
+        missing: true,
+        error: result.error,
+      });
+    }
+    const content = result.output || '';
+    if (content.length > 2 * 1024 * 1024) {
+      return res.status(400).json({ success: false, error: 'Arquivo muito grande no ref (>2MB)' });
+    }
+    res.json({ success: true, content, missing: false });
+  });
+});
+
 // Info do workspace (útil para debug)
 app.get('/api/info', (req, res) => {
   res.json({

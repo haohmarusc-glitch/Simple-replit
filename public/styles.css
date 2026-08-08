@@ -1196,6 +1196,115 @@ body.mode-mobile #toastWrap { bottom: 24px; }
   font-size: 14px;
 }
 
+/* ===== GIT DIFF ===== */
+.diff-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10010;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+.diff-panel {
+  flex: 1;
+  min-height: 0;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #141414;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+.diff-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e6e6e6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-header .diff-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.diff-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.diff-editor-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.diff-file-list {
+  width: min(280px, 40vw);
+  flex-shrink: 0;
+  border-right: 1px solid #333;
+  overflow-y: auto;
+  background: #111;
+}
+.diff-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #222;
+  font-size: 12px;
+}
+.diff-file-row:hover,
+.diff-file-row.active {
+  background: #1e1e1e;
+}
+.diff-file-row .diff-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+.diff-badge.modified { background: #3d2e00; color: #d29922; }
+.diff-badge.added, .diff-badge.untracked { background: #0d3321; color: #3fb950; }
+.diff-badge.deleted { background: #3d1214; color: #f85149; }
+.diff-badge.renamed { background: #122b40; color: #58a6ff; }
+.diff-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ccc;
+  font-family: monospace;
+}
+.diff-empty {
+  padding: 24px;
+  text-align: center;
+  color: #666;
+  font-size: 13px;
+}
+body.mode-mobile .diff-file-list {
+  width: 100%;
+  max-height: 30vh;
+  border-right: none;
+  border-bottom: 1px solid #333;
+}
+body.mode-mobile .diff-body {
+  flex-direction: column;
+}
+
 /* ===== EDITOR TABS ===== */
 .editor-tabs {
   display: none;

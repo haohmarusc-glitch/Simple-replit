@@ -554,6 +554,7 @@ function showContextMenu(e, item) {
 
   const actions = [
     item.type === 'file' ? { label: 'Abrir', fn: () => openFile(item.path) } : null,
+    item.type === 'file' ? { label: 'Git Diff', fn: () => openGitDiff(item.path) } : null,
     { label: 'Renomear', fn: () => promptName('Novo nome', item.name).then((n) => n && n !== item.name && renameItem(item.path, n)) },
     { label: 'Deletar', danger: true, fn: () => promptConfirm('Deletar "' + item.name + '"?').then((ok) => ok && deleteItem(item.path)) },
   ].filter(Boolean);
@@ -782,6 +783,194 @@ document.getElementById('btnGitCommit').onclick = async () => {
   appendConsole('info', '── git add + commit ──');
   gitAction('/api/git/commit', 'POST', { message });
 };
+
+// ========== GIT DIFF (Monaco DiffEditor) ==========
+let diffEditor = null;
+let diffOriginalModel = null;
+let diffModifiedModel = null;
+
+function closeDiffOverlay() {
+  const el = document.getElementById('diffOverlay');
+  if (el) el.remove();
+  if (diffEditor) {
+    try { diffEditor.dispose(); } catch (_) {}
+    diffEditor = null;
+  }
+  if (diffOriginalModel) {
+    try { diffOriginalModel.dispose(); } catch (_) {}
+    diffOriginalModel = null;
+  }
+  if (diffModifiedModel) {
+    try { diffModifiedModel.dispose(); } catch (_) {}
+    diffModifiedModel = null;
+  }
+}
+
+function langFromPath(p) {
+  const ext = (p || '').split('.').pop().toLowerCase();
+  const map = {
+    py: 'python', js: 'javascript', ts: 'typescript', jsx: 'javascript',
+    tsx: 'typescript', html: 'html', css: 'css', json: 'json', md: 'markdown',
+    yml: 'yaml', yaml: 'yaml', sh: 'shell', bash: 'shell', env: 'ini',
+  };
+  return map[ext] || 'plaintext';
+}
+
+async function loadDiffForFile(filePath, status) {
+  const host = document.getElementById('diffEditorHost');
+  const title = document.getElementById('diffTitle');
+  if (!host || typeof monaco === 'undefined') return;
+
+  if (title) title.textContent = filePath + (status ? ` · ${status}` : '');
+
+  document.querySelectorAll('.diff-file-row').forEach((r) => {
+    r.classList.toggle('active', r.dataset.path === filePath);
+  });
+
+  let original = '';
+  let modified = '';
+
+  // HEAD version
+  try {
+    const res = await apiFetch('/api/git/show?path=' + encodeURIComponent(filePath));
+    const data = await res.json();
+    original = data.success ? (data.content || '') : '';
+  } catch (_) {
+    original = '';
+  }
+
+  // Working tree version
+  if (status === 'deleted') {
+    modified = '';
+  } else {
+    try {
+      const res = await apiFetch('/api/file?path=' + encodeURIComponent(filePath));
+      const data = await res.json();
+      modified = data.success ? (data.content || '') : '';
+    } catch (_) {
+      modified = '';
+    }
+  }
+
+  // Prefer content from open editor tab if same file
+  if (currentFile === filePath && editor) {
+    modified = editor.getValue();
+  }
+
+  const lang = langFromPath(filePath);
+
+  if (!diffEditor) {
+    diffEditor = monaco.editor.createDiffEditor(host, {
+      theme: 'vs-dark',
+      readOnly: true,
+      automaticLayout: true,
+      renderSideBySide: !document.body.classList.contains('mode-mobile'),
+      minimap: { enabled: false },
+      fontSize: 13,
+      scrollBeyondLastLine: false,
+    });
+  }
+
+  if (diffOriginalModel) try { diffOriginalModel.dispose(); } catch (_) {}
+  if (diffModifiedModel) try { diffModifiedModel.dispose(); } catch (_) {}
+
+  diffOriginalModel = monaco.editor.createModel(original, lang);
+  diffModifiedModel = monaco.editor.createModel(modified, lang);
+  diffEditor.setModel({ original: diffOriginalModel, modified: diffModifiedModel });
+}
+
+async function openGitDiff(preferPath) {
+  closeDiffOverlay();
+
+  let files = [];
+  try {
+    const res = await apiFetch('/api/git/changed');
+    const data = await res.json();
+    if (!data.success) {
+      toast(data.error || 'Erro ao listar alterações', 'error');
+      appendConsole('stderr', data.error || 'git changed falhou');
+      return;
+    }
+    files = data.files || [];
+  } catch (err) {
+    toast('Erro: ' + err.message, 'error');
+    return;
+  }
+
+  if (!files.length && preferPath) {
+    files = [{ path: preferPath, status: 'modified' }];
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'diffOverlay';
+  overlay.className = 'diff-overlay';
+  overlay.innerHTML = `
+    <div class="diff-panel">
+      <div class="diff-header">
+        <h3 id="diffTitle">Git Diff</h3>
+        <div class="diff-actions">
+          <button type="button" class="btn" id="diffOpenFile">Abrir arquivo</button>
+          <button type="button" class="btn" id="diffClose">Fechar</button>
+        </div>
+      </div>
+      <div class="diff-body">
+        <div class="diff-file-list" id="diffFileList"></div>
+        <div class="diff-editor-host" id="diffEditorHost"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  document.getElementById('diffClose').onclick = closeDiffOverlay;
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDiffOverlay();
+  });
+
+  const list = document.getElementById('diffFileList');
+  let selectedPath = preferPath || (files[0] && files[0].path) || null;
+  let selectedStatus = 'modified';
+
+  if (!files.length) {
+    list.innerHTML = '<div class="diff-empty">Nenhuma alteração no working tree.</div>';
+  } else {
+    files.forEach((f) => {
+      const row = document.createElement('div');
+      row.className = 'diff-file-row' + (f.path === selectedPath ? ' active' : '');
+      row.dataset.path = f.path;
+      row.dataset.status = f.status;
+      row.innerHTML = `<span class="diff-badge ${f.status}">${f.status.slice(0, 1)}</span><span class="diff-file-path" title="${f.path}">${f.path}</span>`;
+      row.onclick = () => {
+        selectedPath = f.path;
+        selectedStatus = f.status;
+        loadDiffForFile(f.path, f.status);
+      };
+      list.appendChild(row);
+      if (f.path === selectedPath) selectedStatus = f.status;
+    });
+  }
+
+  document.getElementById('diffOpenFile').onclick = () => {
+    if (selectedPath) {
+      closeDiffOverlay();
+      openFile(selectedPath);
+    }
+  };
+
+  if (selectedPath) {
+    await loadDiffForFile(selectedPath, selectedStatus);
+  }
+}
+
+document.getElementById('btnGitDiff').onclick = () => {
+  if (typeof closeSheet === 'function') closeSheet();
+  openGitDiff(currentFile || null);
+};
+
+// Escape fecha o diff
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('diffOverlay')) {
+    closeDiffOverlay();
+  }
+});
 
 // ========== SHELL (xterm) + TABS ==========
 const aiChatArea = document.getElementById('aiChatArea');
