@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
@@ -299,6 +299,101 @@ app.post('/api/shell', (req, res) => {
       code: error ? error.code : 0
     });
   });
+});
+
+// ========== LOGS AO VIVO (SSE) ==========
+// Mantém referência do processo atual para poder parar
+let currentLogProcess = null;
+
+app.get('/api/logs/stream', (req, res) => {
+  // Headers SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (type, text) => {
+    res.write(`data: ${JSON.stringify({ type, text })}\n\n`);
+  };
+
+  send('info', '── Iniciando stream de logs ──');
+
+  // Tenta descobrir o melhor comando de log disponível
+  const tryCommands = [
+    ['docker', ['compose', 'logs', '-f', '--tail', '50']],
+    ['docker-compose', ['logs', '-f', '--tail', '50']],
+    ['pm2', ['logs', '--lines', '50']],
+    ['journalctl', ['-f', '-n', '50', '--no-pager']]
+  ];
+
+  function startNext(index) {
+    if (index >= tryCommands.length) {
+      send('info', 'Nenhum provedor de log encontrado (docker/pm2/journalctl). Use o Shell manualmente.');
+      res.write('data: {"type":"done"}\n\n');
+      res.end();
+      return;
+    }
+
+    const [bin, args] = tryCommands[index];
+    send('info', `Tentando: ${bin} ${args.join(' ')}`);
+
+    const child = spawn(bin, args, {
+      cwd: WORKSPACE,
+      shell: false
+    });
+
+    currentLogProcess = child;
+
+    let gotOutput = false;
+
+    child.stdout.on('data', (data) => {
+      gotOutput = true;
+      send('stdout', data.toString());
+    });
+
+    child.stderr.on('data', (data) => {
+      gotOutput = true;
+      send('stderr', data.toString());
+    });
+
+    child.on('error', () => {
+      // binário não existe → tenta o próximo
+      startNext(index + 1);
+    });
+
+    child.on('close', (code) => {
+      currentLogProcess = null;
+      if (!gotOutput && code !== 0) {
+        // não teve saída útil → tenta próximo
+        startNext(index + 1);
+      } else {
+        send('info', `── Stream finalizado (código ${code}) ──`);
+        res.write('data: {"type":"done"}\n\n');
+        res.end();
+      }
+    });
+
+    // Cliente desconectou → mata o processo
+    req.on('close', () => {
+      if (currentLogProcess) {
+        currentLogProcess.kill('SIGTERM');
+        currentLogProcess = null;
+      }
+    });
+  }
+
+  startNext(0);
+});
+
+// Parar o stream de logs
+app.post('/api/logs/stop', (req, res) => {
+  if (currentLogProcess) {
+    currentLogProcess.kill('SIGTERM');
+    currentLogProcess = null;
+    res.json({ success: true, message: 'Stream parado' });
+  } else {
+    res.json({ success: true, message: 'Nenhum stream ativo' });
+  }
 });
 
 // ========== GIT ==========

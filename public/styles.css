@@ -122,6 +122,16 @@ body {
   background: #4a3600;
 }
 
+.btn-stop {
+  background: #3a1515;
+  border-color: #7f1d1d;
+  color: #f87171;
+}
+
+.btn-stop:hover {
+  background: #4a1a1a;
+}
+
 .btn-small {
   background: transparent;
   border: none;

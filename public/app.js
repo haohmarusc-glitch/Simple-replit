@@ -444,40 +444,54 @@ shellInput.addEventListener('keydown', (e) => {
   }
 });
 
-// ========== LOGS RÁPIDOS ==========
-document.getElementById('btnLogs').onclick = async () => {
-  // Troca para aba Shell visualmente
+// ========== LOGS AO VIVO ==========
+let logEventSource = null;
+
+function stopLogStream() {
+  if (logEventSource) {
+    logEventSource.close();
+    logEventSource = null;
+  }
+  fetch('/api/logs/stop', { method: 'POST' }).catch(() => {});
+  document.getElementById('btnLogs').style.display = '';
+  document.getElementById('btnStopLogs').style.display = 'none';
+  appendConsole('info', '── Stream de logs parado ──');
+}
+
+document.getElementById('btnStopLogs').onclick = stopLogStream;
+
+document.getElementById('btnLogs').onclick = () => {
+  // Troca para aba Console (onde os logs aparecem)
   document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.remove('active'));
-  const shellTab = document.querySelector('.console-tabs .tab[data-tab="shell"]');
-  if (shellTab) shellTab.classList.add('active');
-  shellInputArea.style.display = 'flex';
+  const consoleTab = document.querySelector('.console-tabs .tab[data-tab="console"]');
+  if (consoleTab) consoleTab.classList.add('active');
+  shellInputArea.style.display = 'none';
 
-  appendConsole('info', '── Buscando logs de deploy ──');
+  // Se já tiver stream, para antes
+  if (logEventSource) stopLogStream();
 
-  // Tenta vários comandos comuns em ordem
-  const commands = [
-    'docker compose logs --tail 80 2>/dev/null || docker-compose logs --tail 80 2>/dev/null',
-    'pm2 logs --lines 50 --nostream 2>/dev/null',
-    'journalctl -u premercado -n 50 --no-pager 2>/dev/null || journalctl -u docker -n 30 --no-pager 2>/dev/null',
-    'ls -la *.log logs/ 2>/dev/null; tail -n 40 *.log 2>/dev/null; tail -n 40 logs/*.log 2>/dev/null'
-  ];
+  document.getElementById('btnLogs').style.display = 'none';
+  document.getElementById('btnStopLogs').style.display = '';
 
-  for (const cmd of commands) {
-    appendConsole('info', `$ ${cmd.split(' || ')[0]}...`);
+  appendConsole('info', '── Conectando logs ao vivo... ──');
+
+  logEventSource = new EventSource('/api/logs/stream');
+
+  logEventSource.onmessage = (event) => {
     try {
-      const res = await fetch('/api/shell', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: cmd })
-      });
-      const data = await res.json();
-      if (data.output && data.output.length > 5) {
-        appendConsole('stdout', data.output);
-        appendConsole('info', '✔ Logs encontrados');
+      const data = JSON.parse(event.data);
+      if (data.type === 'done') {
+        stopLogStream();
         return;
       }
-    } catch (e) {}
-  }
+      appendConsole(data.type || 'stdout', data.text || '');
+    } catch (e) {
+      appendConsole('stdout', event.data);
+    }
+  };
 
-  appendConsole('info', 'Nenhum log automático encontrado. Use o Shell e digite o comando manualmente (ex: docker compose logs)');
+  logEventSource.onerror = () => {
+    appendConsole('stderr', 'Conexão de logs interrompida');
+    stopLogStream();
+  };
 };
