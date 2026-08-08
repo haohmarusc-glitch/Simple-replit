@@ -514,6 +514,26 @@ body.mode-mobile .ai-chip {
   cursor: pointer;
 }
 
+.file-breadcrumb {
+  flex: 1;
+  min-width: 0;
+  margin: 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, monospace;
+}
+
+.sheet-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 200;
+}
+
 .more-menu {
   position: absolute;
   top: 48px;
@@ -526,7 +546,7 @@ body.mode-mobile .ai-chip {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 180px;
+  min-width: 200px;
   max-height: 70vh;
   overflow-y: auto;
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
@@ -536,7 +556,32 @@ body.mode-mobile .ai-chip {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
+  min-height: 44px;
 }
+
+.sheet-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.sheet-section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 6px 4px 2px;
+}
+
+.sheet-handle,
+.sheet-title,
+.sheet-close,
+.sheet-mode-row {
+  display: none;
+}
+
+.desktop-only { display: inline-flex; }
 
 .sidebar-overlay {
   position: fixed;
@@ -598,7 +643,11 @@ body.mode-mobile .ai-chip {
 
 /* ===== MOBILE: single pane + bottom tabs ===== */
 body.mode-mobile .mobile-only {
-  display: inline-flex !important;
+  display: flex !important;
+}
+
+body.mode-mobile .desktop-only {
+  display: none !important;
 }
 
 body.mode-mobile .bottom-nav {
@@ -610,28 +659,109 @@ body.mode-mobile .btn-label {
   display: none;
 }
 
-body.mode-mobile #btnToggleSidebar,
-body.mode-mobile #btnCloseSidebar,
 body.mode-mobile #sidebarOverlay {
   display: none !important;
 }
 
 body.mode-mobile .topbar {
-  height: 44px;
-  padding: 4px 8px;
+  height: 48px;
+  padding: 4px 10px;
+  gap: 6px;
 }
 
 body.mode-mobile .top-actions {
-  flex: 1;
+  flex-shrink: 0;
   justify-content: flex-end;
-  gap: 4px;
-  overflow-x: auto;
+  gap: 6px;
 }
 
 body.mode-mobile .top-actions .btn,
 body.mode-mobile .top-actions select {
-  min-height: 36px;
-  padding: 6px 10px;
+  min-height: 40px;
+  min-width: 40px;
+  padding: 8px 12px;
+  font-size: 15px;
+}
+
+body.mode-mobile .file-breadcrumb {
+  font-size: 11px;
+}
+
+/* Bottom sheet on mobile */
+body.mode-mobile .sheet-backdrop.show {
+  display: block !important;
+}
+
+body.mode-mobile .more-menu.sheet-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  max-height: 78vh;
+  border-radius: 16px 16px 0 0;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  padding: 8px 12px calc(16px + env(safe-area-inset-bottom, 0));
+  z-index: 210;
+  box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+}
+
+body.mode-mobile .sheet-handle {
+  display: block !important;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: #555;
+  margin: 4px auto 10px;
+}
+
+body.mode-mobile .sheet-title {
+  display: block !important;
+  text-align: center;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+body.mode-mobile .sheet-close {
+  display: flex !important;
+  justify-content: center;
+  margin-top: 8px;
+  min-height: 48px;
+  background: #222;
+}
+
+body.mode-mobile .sheet-mode-row {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 4px;
+}
+
+body.mode-mobile .sheet-mode-row select {
+  flex: 1;
+  min-height: 44px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 15px;
+}
+
+body.mode-mobile .file-item {
+  min-height: 44px;
+  padding: 10px 8px;
+  font-size: 15px;
+}
+
+body.mode-mobile .bnav-label {
+  font-size: 11px;
+}
+
+body.mode-mobile .bnav-item {
+  min-height: 52px;
 }
 
 body.mode-mobile .main {

@@ -151,6 +151,11 @@ async function openFile(filePath) {
       select.value = lang;
     }
 
+    if (typeof updateBreadcrumb === 'function') updateBreadcrumb(filePath);
+    if (document.body.classList.contains('mode-mobile') && typeof setMobileView === 'function') {
+      setMobileView('code');
+    }
+
     renderFileTree();
   } catch (err) {
     alert('Erro ao abrir arquivo: ' + err.message);
@@ -805,39 +810,42 @@ function setMobileView(view) {
   }, 80);
 }
 
-function showActionsPanel() {
-  const out = document.getElementById('consoleOutput');
-  if (!out) return;
-  out.innerHTML = '';
-  const grid = document.createElement('div');
-  grid.className = 'actions-grid';
-  const actions = [
-    { id: 'btnDeploy', label: '🚀 Deploy' },
-    { id: 'btnRestartApp', label: '↻ Restart' },
-    { id: 'btnMonitor', label: '📊 Monitor' },
-    { id: 'btnLogs', label: '📋 Workflow' },
-    { id: 'btnLogsAll', label: '📦 All Logs' },
-    { id: 'btnApiKeys', label: '🔑 API Keys' },
-    { id: 'btnSecrets', label: '🔒 Secrets' },
-    { id: 'btnGitStatus', label: 'Git Status' },
-    { id: 'btnGitPull', label: 'Git Pull' },
-    { id: 'btnGitPush', label: 'Git Push' }
-  ];
-  actions.forEach(a => {
-    const b = document.createElement('button');
-    b.className = 'btn';
-    b.textContent = a.label;
-    b.onclick = () => {
-      const orig = document.getElementById(a.id);
-      if (orig) orig.click();
-      if (a.id === 'btnLogs' || a.id === 'btnLogsAll' || a.id === 'btnMonitor' || a.id === 'btnSecrets') {
-        setMobileView('console');
-      }
-      if (a.id === 'btnApiKeys') setMobileView('code');
-    };
-    grid.appendChild(b);
-  });
-  out.appendChild(grid);
+function updateBreadcrumb(path) {
+  const el = document.getElementById('fileBreadcrumb');
+  if (!el) return;
+  if (!path) {
+    el.textContent = '';
+    el.title = '';
+    return;
+  }
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length <= 3) {
+    el.textContent = parts.join(' › ');
+  } else {
+    el.textContent = parts.slice(0, 1).join('') + ' › … › ' + parts.slice(-2).join(' › ');
+  }
+  el.title = path;
+}
+
+function openSheet() {
+  const menu = document.getElementById('moreMenu');
+  const backdrop = document.getElementById('sheetBackdrop');
+  if (!menu) return;
+  menu.style.display = 'flex';
+  if (backdrop && document.body.classList.contains('mode-mobile')) {
+    backdrop.style.display = 'block';
+    backdrop.classList.add('show');
+  }
+}
+
+function closeSheet() {
+  const menu = document.getElementById('moreMenu');
+  const backdrop = document.getElementById('sheetBackdrop');
+  if (menu) menu.style.display = 'none';
+  if (backdrop) {
+    backdrop.style.display = 'none';
+    backdrop.classList.remove('show');
+  }
 }
 
 (function initMode() {
@@ -852,51 +860,75 @@ function showActionsPanel() {
   });
 })();
 
-document.getElementById('btnToggleSidebar')?.addEventListener('click', () => {
-  sidebar?.classList.add('open');
-  if (sidebarOverlay) sidebarOverlay.style.display = 'block';
-});
-document.getElementById('btnCloseSidebar')?.addEventListener('click', () => {
-  sidebar?.classList.remove('open');
-  if (sidebarOverlay) sidebarOverlay.style.display = 'none';
-});
-sidebarOverlay?.addEventListener('click', () => {
-  sidebar?.classList.remove('open');
-  sidebarOverlay.style.display = 'none';
-});
-
 document.getElementById('btnMore')?.addEventListener('click', (e) => {
   e.stopPropagation();
   if (!moreMenu) return;
-  moreMenu.style.display = moreMenu.style.display === 'none' ? 'flex' : 'none';
+  if (moreMenu.style.display === 'none' || !moreMenu.style.display) openSheet();
+  else closeSheet();
 });
-document.addEventListener('click', (e) => {
-  if (moreMenu && moreMenu.style.display !== 'none') {
-    if (!moreMenu.contains(e.target) && e.target.id !== 'btnMore') {
-      moreMenu.style.display = 'none';
-    }
-  }
+
+document.getElementById('sheetBackdrop')?.addEventListener('click', closeSheet);
+document.getElementById('btnCloseSheet')?.addEventListener('click', closeSheet);
+
+document.getElementById('btnDeploySheet')?.addEventListener('click', () => {
+  document.getElementById('btnDeploy')?.click();
 });
+
 moreMenu?.querySelectorAll('button').forEach(btn => {
+  if (btn.id === 'btnCloseSheet') return;
   btn.addEventListener('click', () => {
-    setTimeout(() => { moreMenu.style.display = 'none'; }, 150);
+    setTimeout(closeSheet, 120);
   });
+});
+
+document.addEventListener('click', (e) => {
+  if (!document.body.classList.contains('mode-mobile') && moreMenu && moreMenu.style.display !== 'none') {
+    if (!moreMenu.contains(e.target) && e.target.id !== 'btnMore') closeSheet();
+  }
 });
 
 // Bottom nav mobile
 document.querySelectorAll('#bottomNav .bnav-item').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (btn.dataset.action === 'more') {
+      openSheet();
+      return;
+    }
+    closeSheet();
     setMobileView(btn.dataset.view);
   });
 });
 
-// Ao abrir arquivo no mobile, vai para Code
-const _origOpenFile = typeof openFile === 'function' ? openFile : null;
-// patch via event: file tree clicks already call openFile — after load, enhance
+// Ao abrir arquivo no mobile → Código + breadcrumb
 document.getElementById('fileTree')?.addEventListener('click', () => {
-  if (document.body.classList.contains('mode-mobile')) {
-    setTimeout(() => {
-      if (currentFile) setMobileView('code');
-    }, 50);
-  }
+  setTimeout(() => {
+    if (typeof currentFile !== 'undefined' && currentFile) {
+      updateBreadcrumb(currentFile);
+      if (document.body.classList.contains('mode-mobile')) setMobileView('code');
+    }
+  }, 80);
 });
+
+// Sync mode selects
+const modeSelectMobile = document.getElementById('modeSelectMobile');
+if (modeSelectMobile && modeSelect) {
+  modeSelectMobile.value = modeSelect.value;
+  modeSelectMobile.onchange = () => {
+    modeSelect.value = modeSelectMobile.value;
+    applyMode(modeSelectMobile.value);
+    closeSheet();
+  };
+  modeSelect.addEventListener('change', () => {
+    modeSelectMobile.value = modeSelect.value;
+  });
+}
+
+// Patch setMobileView: remove old "actions" view dependency
+const _setMobileView = setMobileView;
+setMobileView = function(view) {
+  if (view === 'actions') {
+    openSheet();
+    return;
+  }
+  _setMobileView(view);
+};

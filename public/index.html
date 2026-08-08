@@ -2,21 +2,19 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Simple Replit</title>
   <link rel="stylesheet" href="styles.css" />
-  <!-- Monaco Editor -->
   <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/editor/editor.main.min.css" />
 </head>
 <body>
   <div id="app">
-    <!-- Top bar -->
     <header class="topbar">
       <div class="logo">
-        <button id="btnToggleSidebar" class="btn-icon mobile-only" title="Arquivos">☰</button>
         <span class="logo-icon">◈</span>
         <span class="logo-text">Simple Replit</span>
       </div>
+      <div id="fileBreadcrumb" class="file-breadcrumb" title=""></div>
       <div class="top-actions">
         <select id="languageSelect" title="Linguagem">
           <option value="python">Python</option>
@@ -27,9 +25,9 @@
         </select>
         <button id="btnRun" class="btn btn-primary" title="Rodar (Ctrl+Enter)">▶ <span class="btn-label">Rodar</span></button>
         <button id="btnSave" class="btn" title="Salvar (Ctrl+S)">💾 <span class="btn-label">Salvar</span></button>
-        <button id="btnDeploy" class="btn btn-deploy" title="Deploy">🚀 <span class="btn-label">Deploy</span></button>
-        <button id="btnMore" class="btn" title="Mais ações">⋯</button>
-        <select id="modeSelect" class="mode-select" title="Modo de interface">
+        <button id="btnDeploy" class="btn btn-deploy desktop-only" title="Deploy">🚀 <span class="btn-label">Deploy</span></button>
+        <button id="btnMore" class="btn desktop-only" title="Mais ações">⋯</button>
+        <select id="modeSelect" class="mode-select desktop-only" title="Modo de interface">
           <option value="auto">Auto</option>
           <option value="desktop">💻 PC</option>
           <option value="mobile">📱 Celular</option>
@@ -37,23 +35,47 @@
       </div>
     </header>
 
-    <!-- Menu extra (mobile + overflow) -->
-    <div id="moreMenu" class="more-menu" style="display:none;">
-      <button id="btnGitStatus" class="btn">Git Status</button>
-      <button id="btnGitPull" class="btn">Git Pull</button>
-      <button id="btnGitCommit" class="btn">Git Commit</button>
-      <button id="btnGitPush" class="btn">Git Push</button>
-      <button id="btnApiKeys" class="btn btn-keys">🔑 API Keys</button>
-      <button id="btnSecrets" class="btn btn-keys">🔒 Secrets</button>
-      <button id="btnMonitor" class="btn">📊 Monitor</button>
-      <button id="btnRestartApp" class="btn">↻ Restart App</button>
-      <button id="btnLogs" class="btn btn-logs">📋 Workflow Logs</button>
-      <button id="btnLogsAll" class="btn btn-logs">📦 All Logs</button>
-      <button id="btnStopLogs" class="btn btn-stop" style="display:none;">⏹ Parar Logs</button>
+    <!-- Bottom sheet (mobile) + dropdown (desktop) -->
+    <div id="sheetBackdrop" class="sheet-backdrop" style="display:none;"></div>
+    <div id="moreMenu" class="more-menu sheet-panel" style="display:none;">
+      <div class="sheet-handle mobile-only" aria-hidden="true"></div>
+      <div class="sheet-title mobile-only">Ações</div>
+      <div class="sheet-section">
+        <div class="sheet-section-label">Git</div>
+        <button id="btnGitStatus" class="btn">Git Status</button>
+        <button id="btnGitPull" class="btn">Git Pull</button>
+        <button id="btnGitCommit" class="btn">Git Commit</button>
+        <button id="btnGitPush" class="btn">Git Push</button>
+      </div>
+      <div class="sheet-section">
+        <div class="sheet-section-label">Deploy &amp; App</div>
+        <button id="btnDeploySheet" class="btn btn-deploy">🚀 Deploy</button>
+        <button id="btnRestartApp" class="btn">↻ Restart App</button>
+        <button id="btnMonitor" class="btn">📊 Monitor</button>
+      </div>
+      <div class="sheet-section">
+        <div class="sheet-section-label">Logs</div>
+        <button id="btnLogs" class="btn btn-logs">📋 Workflow Logs</button>
+        <button id="btnLogsAll" class="btn btn-logs">📦 All Logs</button>
+        <button id="btnStopLogs" class="btn btn-stop" style="display:none;">⏹ Parar Logs</button>
+      </div>
+      <div class="sheet-section">
+        <div class="sheet-section-label">Config</div>
+        <button id="btnApiKeys" class="btn btn-keys">🔑 API Keys</button>
+        <button id="btnSecrets" class="btn btn-keys">🔒 Secrets</button>
+        <div class="sheet-mode-row mobile-only">
+          <label for="modeSelectMobile">Interface</label>
+          <select id="modeSelectMobile">
+            <option value="auto">Auto</option>
+            <option value="desktop">💻 PC</option>
+            <option value="mobile">📱 Celular</option>
+          </select>
+        </div>
+      </div>
+      <button type="button" id="btnCloseSheet" class="btn sheet-close mobile-only">Fechar</button>
     </div>
 
     <div class="main">
-      <!-- Sidebar - File Explorer -->
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
           <span>Arquivos</span>
@@ -61,14 +83,12 @@
             <button id="btnNewFile" title="Novo arquivo">＋</button>
             <button id="btnNewFolder" title="Nova pasta">📁</button>
             <button id="btnRefresh" title="Atualizar">↻</button>
-            <button id="btnCloseSidebar" class="mobile-only" title="Fechar">✕</button>
           </div>
         </div>
         <div id="fileTree" class="file-tree"></div>
       </aside>
       <div id="sidebarOverlay" class="sidebar-overlay mobile-only" style="display:none;"></div>
 
-      <!-- Editor + Console -->
       <div class="editor-area">
         <div id="editor" class="editor"></div>
         <div class="console-panel">
@@ -111,15 +131,14 @@
       </div>
     </div>
 
-    <!-- Bottom nav (mobile) — estilo Replit Mobile / apps nativos -->
     <nav id="bottomNav" class="bottom-nav mobile-only" aria-label="Navegação mobile">
       <button type="button" class="bnav-item active" data-view="files" title="Arquivos">
         <span class="bnav-icon">📁</span>
-        <span class="bnav-label">Files</span>
+        <span class="bnav-label">Arquivos</span>
       </button>
       <button type="button" class="bnav-item" data-view="code" title="Código">
         <span class="bnav-icon">✏️</span>
-        <span class="bnav-label">Code</span>
+        <span class="bnav-label">Código</span>
       </button>
       <button type="button" class="bnav-item" data-view="console" title="Console / Shell">
         <span class="bnav-icon">💻</span>
@@ -129,14 +148,13 @@
         <span class="bnav-icon">🤖</span>
         <span class="bnav-label">AI</span>
       </button>
-      <button type="button" class="bnav-item" data-view="actions" title="Ações">
-        <span class="bnav-icon">⚡</span>
-        <span class="bnav-label">Ações</span>
+      <button type="button" class="bnav-item" data-action="more" title="Mais">
+        <span class="bnav-icon">⋯</span>
+        <span class="bnav-label">Mais</span>
       </button>
     </nav>
   </div>
 
-  <!-- Monaco loader -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
   <script src="app.js"></script>
 </body>
