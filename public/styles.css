@@ -514,29 +514,81 @@ body {
   display: none !important;
 }
 
-/* ===== MOBILE MODE ===== */
+/* ===== BOTTOM NAV ===== */
+.bottom-nav {
+  display: none;
+  flex-shrink: 0;
+  height: 58px;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  background: #121212;
+  border-top: 1px solid var(--border);
+  z-index: 90;
+}
+
+.bnav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  color: #888;
+  font-size: 10px;
+  cursor: pointer;
+  min-height: 48px;
+  padding: 4px 2px;
+}
+
+.bnav-item.active {
+  color: #7dd3fc;
+}
+
+.bnav-icon { font-size: 20px; line-height: 1; }
+
+.actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.actions-grid .btn {
+  min-height: 52px;
+  font-size: 14px;
+  justify-content: center;
+}
+
+/* ===== MOBILE: single pane + bottom tabs ===== */
 body.mode-mobile .mobile-only {
   display: inline-flex !important;
 }
 
-body.mode-mobile .logo-text {
-  display: none;
+body.mode-mobile .bottom-nav {
+  display: flex !important;
 }
 
+body.mode-mobile .logo-text,
 body.mode-mobile .btn-label {
   display: none;
 }
 
+body.mode-mobile #btnToggleSidebar,
+body.mode-mobile #btnCloseSidebar,
+body.mode-mobile #sidebarOverlay {
+  display: none !important;
+}
+
 body.mode-mobile .topbar {
-  padding: 6px 8px;
-  gap: 6px;
-  flex-wrap: nowrap;
+  height: 44px;
+  padding: 4px 8px;
 }
 
 body.mode-mobile .top-actions {
   flex: 1;
   justify-content: flex-end;
-  flex-wrap: nowrap;
   gap: 4px;
   overflow-x: auto;
 }
@@ -545,61 +597,82 @@ body.mode-mobile .top-actions .btn,
 body.mode-mobile .top-actions select {
   min-height: 36px;
   padding: 6px 10px;
-  font-size: 13px;
 }
 
 body.mode-mobile .main {
-  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   position: relative;
+  overflow: hidden;
 }
 
 body.mode-mobile .sidebar {
-  position: fixed;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: min(85vw, 300px);
-  z-index: 50;
-  transform: translateX(-100%);
-  transition: transform 0.2s ease;
-  box-shadow: 4px 0 20px rgba(0,0,0,0.4);
-}
-
-body.mode-mobile .sidebar.open {
-  transform: translateX(0);
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  border-right: none;
+  transform: none !important;
+  display: none;
+  flex-direction: column;
+  z-index: 5;
 }
 
 body.mode-mobile .editor-area {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  min-height: 0;
+  display: none;
+  flex-direction: column;
 }
 
 body.mode-mobile .console-panel {
-  height: 38%;
-  min-height: 160px;
+  height: auto !important;
+  min-height: 0;
+  flex: 1;
+  display: none;
+  flex-direction: column;
 }
 
-body.mode-mobile .ai-msg.user {
-  margin-left: 8%;
-}
+body.mode-mobile.view-files .sidebar { display: flex !important; }
+body.mode-mobile.view-code .editor-area { display: flex !important; }
+body.mode-mobile.view-code .console-panel { display: none !important; }
+body.mode-mobile.view-code #editor { display: block !important; flex: 1; }
 
-body.mode-mobile .ai-msg.assistant {
-  margin-right: 4%;
-}
+body.mode-mobile.view-console .editor-area { display: flex !important; }
+body.mode-mobile.view-console #editor { display: none !important; }
+body.mode-mobile.view-console .console-panel { display: flex !important; flex: 1; }
+
+body.mode-mobile.view-ai .editor-area { display: flex !important; }
+body.mode-mobile.view-ai #editor { display: none !important; }
+body.mode-mobile.view-ai .console-panel { display: flex !important; flex: 1; }
+
+body.mode-mobile.view-actions .editor-area { display: flex !important; }
+body.mode-mobile.view-actions #editor { display: none !important; }
+body.mode-mobile.view-actions .console-panel { display: flex !important; flex: 1; }
 
 body.mode-mobile #aiInput,
-body.mode-mobile #shellInput {
-  font-size: 16px;
-}
+body.mode-mobile #shellInput { font-size: 16px; }
 
-body.mode-desktop .mobile-only {
-  display: none !important;
-}
+body.mode-mobile .file-tree { font-size: 15px; padding: 8px; }
+
+body.mode-desktop .mobile-only,
+body.mode-desktop .bottom-nav { display: none !important; }
 
 body.mode-desktop .sidebar {
   position: relative;
   transform: none !important;
   width: 240px;
+  display: flex !important;
+}
+
+body.mode-desktop .editor-area {
+  display: flex !important;
+  position: relative;
+}
+
+body.mode-desktop .console-panel {
+  display: flex !important;
+  position: relative;
 }
 
 /* Scrollbar */

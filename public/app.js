@@ -741,9 +741,91 @@ function applyMode(mode) {
 
   localStorage.setItem('sr_mode', mode);
 
+  if (effective === 'mobile') {
+    setMobileView(localStorage.getItem('sr_mobile_view') || 'files');
+  } else {
+    document.body.classList.remove('view-files', 'view-code', 'view-console', 'view-ai', 'view-actions');
+  }
+
   setTimeout(() => {
     if (typeof editor !== 'undefined' && editor) editor.layout();
   }, 100);
+}
+
+function setMobileView(view) {
+  const views = ['files', 'code', 'console', 'ai', 'actions'];
+  views.forEach(v => document.body.classList.remove('view-' + v));
+  document.body.classList.add('view-' + view);
+  localStorage.setItem('sr_mobile_view', view);
+
+  document.querySelectorAll('#bottomNav .bnav-item').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === view);
+  });
+
+  // Sincroniza tabs internas console/shell/ai
+  const shellInputArea = document.getElementById('shellInputArea');
+  const aiChatArea = document.getElementById('aiChatArea');
+  const consoleOutputEl = document.getElementById('consoleOutput');
+  const aiModelWrap = document.getElementById('aiModelWrap');
+
+  if (view === 'ai') {
+    document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'ai'));
+    if (consoleOutputEl) consoleOutputEl.style.display = 'none';
+    if (shellInputArea) shellInputArea.style.display = 'none';
+    if (aiChatArea) aiChatArea.style.display = 'flex';
+    if (aiModelWrap) aiModelWrap.style.display = 'block';
+  } else if (view === 'console') {
+    document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'console'));
+    if (consoleOutputEl) consoleOutputEl.style.display = 'block';
+    if (shellInputArea) shellInputArea.style.display = 'none';
+    if (aiChatArea) aiChatArea.style.display = 'none';
+    if (aiModelWrap) aiModelWrap.style.display = 'none';
+  } else if (view === 'actions') {
+    // Mostra console com grid de ações
+    if (consoleOutputEl) consoleOutputEl.style.display = 'block';
+    if (shellInputArea) shellInputArea.style.display = 'none';
+    if (aiChatArea) aiChatArea.style.display = 'none';
+    showActionsPanel();
+  }
+
+  setTimeout(() => {
+    if (typeof editor !== 'undefined' && editor) editor.layout();
+  }, 80);
+}
+
+function showActionsPanel() {
+  const out = document.getElementById('consoleOutput');
+  if (!out) return;
+  out.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'actions-grid';
+  const actions = [
+    { id: 'btnDeploy', label: '🚀 Deploy' },
+    { id: 'btnRestartApp', label: '↻ Restart' },
+    { id: 'btnMonitor', label: '📊 Monitor' },
+    { id: 'btnLogs', label: '📋 Workflow' },
+    { id: 'btnLogsAll', label: '📦 All Logs' },
+    { id: 'btnApiKeys', label: '🔑 API Keys' },
+    { id: 'btnSecrets', label: '🔒 Secrets' },
+    { id: 'btnGitStatus', label: 'Git Status' },
+    { id: 'btnGitPull', label: 'Git Pull' },
+    { id: 'btnGitPush', label: 'Git Push' }
+  ];
+  actions.forEach(a => {
+    const b = document.createElement('button');
+    b.className = 'btn';
+    b.textContent = a.label;
+    b.onclick = () => {
+      const orig = document.getElementById(a.id);
+      if (orig) orig.click();
+      if (a.id === 'btnLogs' || a.id === 'btnLogsAll' || a.id === 'btnMonitor' || a.id === 'btnSecrets') {
+        setMobileView('console');
+      }
+      if (a.id === 'btnApiKeys') setMobileView('code');
+    };
+    grid.appendChild(b);
+  });
+  out.appendChild(grid);
 }
 
 (function initMode() {
@@ -787,4 +869,22 @@ moreMenu?.querySelectorAll('button').forEach(btn => {
   btn.addEventListener('click', () => {
     setTimeout(() => { moreMenu.style.display = 'none'; }, 150);
   });
+});
+
+// Bottom nav mobile
+document.querySelectorAll('#bottomNav .bnav-item').forEach(btn => {
+  btn.addEventListener('click', () => {
+    setMobileView(btn.dataset.view);
+  });
+});
+
+// Ao abrir arquivo no mobile, vai para Code
+const _origOpenFile = typeof openFile === 'function' ? openFile : null;
+// patch via event: file tree clicks already call openFile — after load, enhance
+document.getElementById('fileTree')?.addEventListener('click', () => {
+  if (document.body.classList.contains('mode-mobile')) {
+    setTimeout(() => {
+      if (currentFile) setMobileView('code');
+    }, 50);
+  }
 });
