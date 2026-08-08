@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { exec, spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
-const { WORKSPACE, AUTH_TOKEN, SHELL_OPEN, BACKUP_DIR } = require('../config');
+const { WORKSPACE, AUTH_TOKEN, SHELL_OPEN, BACKUP_DIR, PORT } = require('../config');
 const { getSafePath, listFiles, runGit, loadEnvKeys } = require('../helpers');
 const { rateLimit } = require('../middleware');
 
@@ -646,7 +646,8 @@ app.get('/api/info', (req, res) => {
   res.json({
     workspace: WORKSPACE,
     exists: fs.existsSync(WORKSPACE),
-    port: PORT
+    port: PORT,
+    backupDir: BACKUP_DIR,
   });
 });
 
