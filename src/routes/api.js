@@ -117,58 +117,156 @@ app.delete('/api/file', (req, res) => {
 });
 
 // ========== EXECUTAR CÓDIGO ==========
+// ========== RUN (sandbox quando Docker disponível) ==========
 app.post('/api/run', rateLimit(20, 60_000), (req, res) => {
-  const { code, language, filename } = req.body;
+  const { code, language } = req.body;
 
   if (!code || !language) {
     return res.status(400).json({ success: false, error: 'code e language são obrigatórios' });
+  }
+  if (String(code).length > 500_000) {
+    return res.status(400).json({ success: false, error: 'Código muito grande (>500KB)' });
   }
 
   const id = uuidv4().slice(0, 8);
   const tempDir = path.join(WORKSPACE, '.temp');
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-  let command = '';
   let tempFile = '';
+  let relTemp = '';
+  let bin = '';
+  let localArgs = [];
 
   try {
     if (language === 'javascript' || language === 'js') {
       tempFile = path.join(tempDir, `${id}.js`);
+      relTemp = path.join('.temp', `${id}.js`);
       fs.writeFileSync(tempFile, code, 'utf8');
-      command = `node "${tempFile}"`;
+      bin = 'node';
+      localArgs = [tempFile];
     } else if (language === 'python' || language === 'py') {
       tempFile = path.join(tempDir, `${id}.py`);
+      relTemp = path.join('.temp', `${id}.py`);
       fs.writeFileSync(tempFile, code, 'utf8');
-      command = `python3 "${tempFile}"`;
+      bin = 'python3';
+      localArgs = [tempFile];
     } else {
       return res.status(400).json({
         success: false,
-        error: 'Linguagem não suportada para execução. Use python ou javascript.'
+        error: 'Linguagem não suportada para execução. Use python ou javascript.',
       });
     }
 
-    // Timeout de 15 segundos
-    exec(command, {
-      timeout: 15000,
-      maxBuffer: 2 * 1024 * 1024,
-      cwd: WORKSPACE
-    }, (error, stdout, stderr) => {
-      try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch (e) {}
+    const cleanup = () => {
+      try { if (tempFile && fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch (_) {}
+    };
 
+    const finish = (error, stdout, stderr, meta) => {
+      cleanup();
       if (error && error.killed) {
         return res.json({
           success: false,
-          output: '',
-          error: 'Tempo limite excedido (15s)'
+          output: stdout || '',
+          error: 'Tempo limite excedido (15s)',
+          sandbox: meta && meta.sandbox,
         });
       }
-
       res.json({
         success: !error,
         output: stdout || '',
-        error: stderr || (error ? error.message : '')
+        error: (stderr || (error ? error.message : '') || '').toString(),
+        sandbox: meta && meta.sandbox,
       });
+    };
+
+    // Preferência: Docker isolado (sem rede, memória limitada, só workspace montado)
+    const dockerImage = bin === 'node' ? 'node:20-alpine' : 'python:3.12-alpine';
+    const dockerArgs = [
+      'run', '--rm',
+      '--network', 'none',
+      '--memory', '256m',
+      '--cpus', '0.5',
+      '--pids-limit', '64',
+      '-v', `${WORKSPACE}:/work:rw`,
+      '-w', '/work',
+      dockerImage,
+      bin === 'node' ? 'node' : 'python3',
+      relTemp.replace(/\\/g, '/'),
+    ];
+
+    const childDocker = spawn('docker', dockerArgs, {
+      cwd: WORKSPACE,
+      shell: false,
+      env: { PATH: process.env.PATH || '/usr/bin:/bin' },
     });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      try { childDocker.kill('SIGKILL'); } catch (_) {}
+    }, 15000);
+
+    childDocker.stdout.on('data', (d) => { stdout += d.toString(); });
+    childDocker.stderr.on('data', (d) => { stderr += d.toString(); });
+
+    childDocker.on('error', () => {
+      // Docker indisponível → fallback local restrito
+      clearTimeout(timer);
+      if (settled) return;
+      runLocalRestricted();
+    });
+
+    childDocker.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (settled) return;
+      // Se docker nem chegou a rodar a imagem (ex: daemon down), stderr típico
+      const dockerMissing =
+        /Cannot connect to the Docker daemon|Is the docker daemon running|executable file not found|No such file/i.test(stderr);
+      if (dockerMissing && code !== 0 && !stdout) {
+        runLocalRestricted();
+        return;
+      }
+      settled = true;
+      const err = code === 0 ? null : Object.assign(new Error(stderr || `exit ${code}`), {
+        killed: signal === 'SIGKILL',
+      });
+      finish(err, stdout, stderr, { sandbox: 'docker' });
+    });
+
+    function runLocalRestricted() {
+      if (settled) return;
+      const child = spawn(bin, localArgs, {
+        cwd: WORKSPACE,
+        shell: false,
+        env: {
+          PATH: '/usr/local/bin:/usr/bin:/bin',
+          HOME: WORKSPACE,
+          LANG: 'C.UTF-8',
+          NODE_OPTIONS: '--max-old-space-size=128',
+        },
+      });
+      let out = '';
+      let err = '';
+      const t = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch (_) {}
+      }, 15000);
+      child.stdout.on('data', (d) => { out += d.toString(); });
+      child.stderr.on('data', (d) => { err += d.toString(); });
+      child.on('error', (e) => {
+        clearTimeout(t);
+        settled = true;
+        finish(e, out, err, { sandbox: 'local-restricted' });
+      });
+      child.on('close', (code, signal) => {
+        clearTimeout(t);
+        settled = true;
+        const e = code === 0 ? null : Object.assign(new Error(err || `exit ${code}`), {
+          killed: signal === 'SIGKILL',
+        });
+        finish(e, out, err, { sandbox: 'local-restricted' });
+      });
+    }
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -178,28 +276,52 @@ app.post('/api/run', rateLimit(20, 60_000), (req, res) => {
 // Whitelist de binários permitidos (primeiro token do comando)
 const SHELL_WHITELIST = new Set([
   'ls', 'pwd', 'cat', 'head', 'tail', 'wc', 'echo', 'date', 'whoami', 'id',
-  'git', 'node', 'npm', 'npx', 'python', 'python3', 'pip', 'pip3',
-  'docker', 'pm2', 'curl', 'wget', 'df', 'du', 'free', 'ps', 'top', 'htop',
+  'git', 'npm', 'npx', 'pip', 'pip3',
+  'docker', 'pm2', 'curl', 'wget', 'df', 'du', 'free', 'ps',
   'find', 'grep', 'rg', 'sed', 'awk', 'sort', 'uniq', 'diff', 'tree',
-  'which', 'env', 'printenv', 'uname', 'uptime', 'ss', 'ip'
+  'which', 'env', 'printenv', 'uname', 'uptime', 'ss', 'ip',
 ]);
 
+// node/python removidos da whitelist padrão — use /api/run (sandbox).
+// Ainda bloqueamos flags de eval mesmo se SHELL_MODE=open parcialmente.
+
 const BLOCKED_PATTERNS = [
-  /rm\s+-rf\s+\/$/,
-  /rm\s+-rf\s+\/\s/,
-  /mkfs/,
+  /rm\s+-rf\s+\//,
+  /rm\s+-fr\s+\//,
+  /mkfs\b/,
   /dd\s+if=/,
   /:\(\)\s*\{/,
   /\bshutdown\b/,
   /\breboot\b/,
   /\bpasswd\b/,
   /\buserdel\b/,
-  /chmod\s+777\s+\//,
+  /chmod\s+(-R\s+)?777\s+\//,
   /chown\s+-R\s+.*\s+\//,
   />\s*\/etc\//,
   /curl\s+[^\n]*\|\s*(ba)?sh/,
   /wget\s+[^\n]*\|\s*(ba)?sh/,
+  // eval / code injection flags
+  /\bnode\s+(-e|--eval)\b/i,
+  /\bnodejs\s+(-e|--eval)\b/i,
+  /\bpython3?\s+(-c|--command)\b/i,
+  /\bperl\s+-e\b/i,
+  /\bruby\s+-e\b/i,
+  /\bphp\s+-r\b/i,
+  /\bnpm\s+exec\b/i,
+  /\bnpx\s+(-[^\s]+\s+)*(-e|--eval)\b/i,
+  /\blua\s+-e\b/i,
+  /\bos\.system\b/i,
+  /\bsubprocess\b/i,
+  /\/dev\/sd[a-z]/,
+  /\bmkfs\./,
+  /\biptables\b/,
+  /\bufw\b/,
 ];
+
+function shellFirstToken(cmd) {
+  const cleaned = cmd.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+/, '');
+  return cleaned.split(/[\s|;]+/)[0] || '';
+}
 
 app.post('/api/shell', rateLimit(30, 60_000), (req, res) => {
   const { command } = req.body;
@@ -208,46 +330,52 @@ app.post('/api/shell', rateLimit(30, 60_000), (req, res) => {
   }
 
   const cmd = command.trim();
+  if (cmd.length > 4000) {
+    return res.status(400).json({ success: false, error: 'Comando muito longo' });
+  }
 
+  // Sempre aplica bloqueios críticos (mesmo SHELL_MODE=open)
   for (const re of BLOCKED_PATTERNS) {
     if (re.test(cmd)) {
       return res.json({
         success: false,
         output: '',
-        error: 'Comando bloqueado por segurança'
+        error: 'Comando bloqueado por segurança',
       });
     }
   }
 
   if (!SHELL_OPEN) {
-    // Extrai primeiro comando (ignora env VAR=x no início simples)
-    const cleaned = cmd.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+/, '');
-    const first = cleaned.split(/[\s|;]+/)[0];
-    // permite paths tipo ./script.py só se extensão conhecida? — bloqueia paths
+    const first = shellFirstToken(cmd);
     const base = path.basename(first);
     if (!SHELL_WHITELIST.has(base) && !SHELL_WHITELIST.has(first)) {
       return res.json({
         success: false,
         output: '',
-        error: `Comando não permitido: "${base}". Whitelist: ${[...SHELL_WHITELIST].slice(0, 20).join(', ')}… (SHELL_MODE=open para liberar)`
+        error: `Comando não permitido: "${base}". Whitelist restrita (node/python via botão Rodar). SHELL_MODE=open para liberar.`,
       });
     }
-    // Bloqueia shell chaining agressivo fora do modo open
-    if (/[;&`|]|\$\(|<\(/.test(cmd) && !cmd.startsWith('git ')) {
-      // permite pipes simples com comandos da whitelist
-      const parts = cmd.split(/\|/).map((p) => p.trim());
+    // chaining / substitution
+    if (/[;&`]|\$\(|<\(/.test(cmd) && !cmd.startsWith('git ')) {
+      return res.json({
+        success: false,
+        output: '',
+        error: 'Operadores ; & ` $() <(  bloqueados no modo whitelist',
+      });
+    }
+    // pipes: cada segmento deve ser whitelist
+    if (cmd.includes('|')) {
+      const parts = cmd.split(/\|/).map((p) => p.trim()).filter(Boolean);
       for (const part of parts) {
-        const b = path.basename(part.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+/, '').split(/\s+/)[0] || '');
-        if (!SHELL_WHITELIST.has(b)) {
+        const t = shellFirstToken(part);
+        const b = path.basename(t);
+        if (!SHELL_WHITELIST.has(b) && !SHELL_WHITELIST.has(t)) {
           return res.json({
             success: false,
             output: '',
-            error: `Pipe/comando não permitido: "${b}"`
+            error: `Pipe/comando não permitido: "${b}"`,
           });
         }
-      }
-      if (/[;&`]|\$\(/.test(cmd)) {
-        return res.json({ success: false, output: '', error: 'Operadores ; & ` $() bloqueados no modo whitelist' });
       }
     }
   }
@@ -257,13 +385,13 @@ app.post('/api/shell', rateLimit(30, 60_000), (req, res) => {
     timeout: 30000,
     maxBuffer: 3 * 1024 * 1024,
     shell: '/bin/bash',
-    env: { ...process.env, PATH: process.env.PATH }
+    env: { ...process.env, PATH: process.env.PATH },
   }, (error, stdout, stderr) => {
     res.json({
       success: !error,
       output: (stdout || '').trim(),
       error: (stderr || (error ? error.message : '')).trim(),
-      code: error ? error.code : 0
+      code: error ? error.code : 0,
     });
   });
 });
@@ -367,6 +495,8 @@ function runTar(args, timeoutMs = 120000) {
   });
 }
 
+const MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB comprimido
+
 function makeWorkspaceBackup(label) {
   const name = backupFileName(label);
   const outPath = path.join(BACKUP_DIR, name);
@@ -376,9 +506,19 @@ function makeWorkspaceBackup(label) {
   const excludeArgs = BACKUP_EXCLUDE.flatMap((d) => ['--exclude', d]);
   const args = ['-czf', outPath, ...excludeArgs, '-C', parent, base];
   return runTar(args, 120000).then((r) => {
-    if (!r.ok) return { success: false, error: r.error };
+    if (!r.ok) {
+      try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch (_) {}
+      return { success: false, error: r.error };
+    }
     let size = 0;
     try { size = fs.statSync(outPath).size; } catch (_) {}
+    if (size > MAX_BACKUP_BYTES) {
+      try { fs.unlinkSync(outPath); } catch (_) {}
+      return {
+        success: false,
+        error: `Backup muito grande (${(size / (1024 * 1024)).toFixed(0)} MB). Limite 2 GB.`,
+      };
+    }
     return {
       success: true,
       name,
@@ -386,6 +526,83 @@ function makeWorkspaceBackup(label) {
       size,
       sizeHuman: (size / (1024 * 1024)).toFixed(2) + ' MB',
     };
+  });
+}
+
+/** Valida entries de um .tar.gz antes de extrair (path traversal / symlink) */
+function validateTarArchive(archivePath) {
+  return new Promise((resolve) => {
+    const child = spawn('tar', ['-tzf', archivePath], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch (_) {}
+      resolve({ ok: false, error: 'Timeout ao listar backup' });
+    }, 60000);
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ ok: false, error: err.message });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        return resolve({ ok: false, error: (stderr || 'tar -tzf falhou').trim() });
+      }
+      const entries = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+      const expectedRoot = path.basename(WORKSPACE);
+      for (const entry of entries) {
+        // absolute path
+        if (entry.startsWith('/') || /^[A-Za-z]:/.test(entry)) {
+          return resolve({ ok: false, error: `Entry com path absoluto bloqueada: ${entry}` });
+        }
+        if (entry.includes('..')) {
+          return resolve({ ok: false, error: `Entry com .. bloqueada: ${entry}` });
+        }
+        // deve ficar sob o nome do workspace (tar criado com -C parent base)
+        if (!entry.startsWith(expectedRoot + '/') && entry !== expectedRoot) {
+          return resolve({
+            ok: false,
+            error: `Entry fora do workspace (${expectedRoot}): ${entry}`,
+          });
+        }
+      }
+      // symlinks: tar -tvz mostra type; usamos -tvzf se disponível
+      resolve({ ok: true, entries: entries.length });
+    });
+  });
+}
+
+function validateTarSymlinks(archivePath) {
+  return new Promise((resolve) => {
+    const child = spawn('tar', ['-tvzf', archivePath], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch (_) {}
+      resolve({ ok: true }); // se timeout no verbose, não bloqueia demais
+    }, 60000);
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.on('error', () => { clearTimeout(timer); resolve({ ok: true }); });
+    child.on('close', () => {
+      clearTimeout(timer);
+      const lines = stdout.split('\n');
+      for (const line of lines) {
+        // symlink lines start with 'l' in tar -tv
+        if (/^l/.test(line.trim())) {
+          // target after " -> "
+          const m = line.match(/->\s*(.+)\s*$/);
+          const target = (m && m[1] ? m[1].trim() : '');
+          if (target.startsWith('/') || target.includes('..')) {
+            return resolve({
+              ok: false,
+              error: `Symlink perigoso no backup: ${target}`,
+            });
+          }
+        }
+      }
+      resolve({ ok: true });
+    });
   });
 }
 
@@ -441,6 +658,16 @@ app.post('/api/restore', rateLimit(3, 120_000), async (req, res) => {
       return res.status(404).json({ success: false, error: 'Backup não encontrado' });
     }
 
+    // Valida conteúdo do tar ANTES de extrair
+    const listCheck = await validateTarArchive(archive);
+    if (!listCheck.ok) {
+      return res.status(400).json({ success: false, error: listCheck.error || 'Backup inválido' });
+    }
+    const linkCheck = await validateTarSymlinks(archive);
+    if (!linkCheck.ok) {
+      return res.status(400).json({ success: false, error: linkCheck.error || 'Symlink bloqueado' });
+    }
+
     let safety = null;
     if (makeSafetyBackup !== false) {
       safety = await makeWorkspaceBackup('pre-restore');
@@ -450,7 +677,8 @@ app.post('/api/restore', rateLimit(3, 120_000), async (req, res) => {
     }
 
     const parent = path.dirname(WORKSPACE);
-    const r = await runTar(['-xzf', archive, '-C', parent], 180000);
+    // --no-same-owner reduz surpresas de permissão; paths já validados
+    const r = await runTar(['-xzf', archive, '-C', parent, '--no-same-owner'], 180000);
     if (!r.ok) {
       return res.status(500).json({ success: false, error: r.error || 'Falha ao restaurar' });
     }
@@ -459,6 +687,7 @@ app.post('/api/restore', rateLimit(3, 120_000), async (req, res) => {
       message: `Restaurado a partir de ${name}`,
       workspace: WORKSPACE,
       safetyBackup: safety && safety.success ? safety.name : null,
+      entries: listCheck.entries,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -486,50 +715,66 @@ app.delete('/api/backup', rateLimit(10, 60_000), (req, res) => {
 });
 
 // ========== LOGS AO VIVO (SSE) ==========
-// Mantém referência do processo atual para poder parar
-let currentLogProcess = null;
+// Um processo por cliente (evita sobrescrever e órfãos)
+const logStreams = new Map(); // id -> { child, res }
+
+function killLogStream(id) {
+  const entry = logStreams.get(id);
+  if (!entry) return false;
+  try {
+    if (entry.child) entry.child.kill('SIGTERM');
+  } catch (_) {}
+  logStreams.delete(id);
+  return true;
+}
 
 app.get('/api/logs/stream', (req, res) => {
-  // Headers SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
+  const streamId = uuidv4();
   const send = (type, text) => {
-    res.write(`data: ${JSON.stringify({ type, text })}\n\n`);
+    try {
+      res.write(`data: ${JSON.stringify({ type, text })}\n\n`);
+    } catch (_) {}
   };
 
-  const mode = req.query.mode || 'app'; // app | all | panel
-  send('info', `── Logs ao vivo (${mode}) ──`);
+  const mode = req.query.mode || 'app';
+  send('info', `── Logs ao vivo (${mode}) · id ${streamId.slice(0, 8)} ──`);
 
-  // Comandos priorizados para o Premercado
   let tryCommands;
   if (mode === 'panel') {
     tryCommands = [
       ['docker', ['logs', '-f', '--tail', '80', 'deploy-panel-panel-1']],
-      ['docker', ['compose', '-f', '/opt/deploy-panel/docker-compose.yml', 'logs', '-f', '--tail', '50']]
+      ['docker', ['compose', '-f', '/opt/deploy-panel/docker-compose.yml', 'logs', '-f', '--tail', '50']],
     ];
   } else if (mode === 'all') {
     tryCommands = [
       ['docker', ['compose', 'logs', '-f', '--tail', '40']],
-      ['docker-compose', ['logs', '-f', '--tail', '40']]
+      ['docker-compose', ['logs', '-f', '--tail', '40']],
     ];
   } else {
-    // workflow / app (padrão) — container do agente Premercado
     tryCommands = [
       ['docker', ['logs', '-f', '--tail', '100', 'premercado-app-1']],
       ['docker', ['compose', 'logs', '-f', '--tail', '80', 'app']],
       ['docker-compose', ['logs', '-f', '--tail', '80', 'app']],
-      ['pm2', ['logs', '--lines', '50']]
+      ['pm2', ['logs', '--lines', '50']],
     ];
   }
 
+  let closed = false;
+
   function startNext(index) {
+    if (closed) return;
     if (index >= tryCommands.length) {
-      send('info', 'Nenhum provedor de log encontrado (docker/pm2/journalctl). Use o Shell manualmente.');
-      res.write('data: {"type":"done"}\n\n');
-      res.end();
+      send('info', 'Nenhum provedor de log encontrado (docker/pm2). Use o Shell.');
+      try {
+        res.write('data: {"type":"done"}\n\n');
+        res.end();
+      } catch (_) {}
+      logStreams.delete(streamId);
       return;
     }
 
@@ -538,10 +783,9 @@ app.get('/api/logs/stream', (req, res) => {
 
     const child = spawn(bin, args, {
       cwd: WORKSPACE,
-      shell: false
+      shell: false,
     });
-
-    currentLogProcess = child;
+    logStreams.set(streamId, { child, res });
 
     let gotOutput = false;
 
@@ -549,50 +793,46 @@ app.get('/api/logs/stream', (req, res) => {
       gotOutput = true;
       send('stdout', data.toString());
     });
-
     child.stderr.on('data', (data) => {
       gotOutput = true;
       send('stderr', data.toString());
     });
-
     child.on('error', () => {
-      // binário não existe → tenta o próximo
-      startNext(index + 1);
+      if (!closed) startNext(index + 1);
     });
-
     child.on('close', (code) => {
-      currentLogProcess = null;
+      const stillMine = logStreams.get(streamId) && logStreams.get(streamId).child === child;
+      if (!stillMine || closed) return;
       if (!gotOutput && code !== 0) {
-        // não teve saída útil → tenta próximo
         startNext(index + 1);
       } else {
         send('info', `── Stream finalizado (código ${code}) ──`);
-        res.write('data: {"type":"done"}\n\n');
-        res.end();
-      }
-    });
-
-    // Cliente desconectou → mata o processo
-    req.on('close', () => {
-      if (currentLogProcess) {
-        currentLogProcess.kill('SIGTERM');
-        currentLogProcess = null;
+        try {
+          res.write('data: {"type":"done"}\n\n');
+          res.end();
+        } catch (_) {}
+        logStreams.delete(streamId);
       }
     });
   }
+
+  req.on('close', () => {
+    closed = true;
+    killLogStream(streamId);
+  });
 
   startNext(0);
 });
 
-// Parar o stream de logs
 app.post('/api/logs/stop', (req, res) => {
-  if (currentLogProcess) {
-    currentLogProcess.kill('SIGTERM');
-    currentLogProcess = null;
-    res.json({ success: true, message: 'Stream parado' });
-  } else {
-    res.json({ success: true, message: 'Nenhum stream ativo' });
+  let n = 0;
+  for (const id of [...logStreams.keys()]) {
+    if (killLogStream(id)) n += 1;
   }
+  res.json({
+    success: true,
+    message: n ? `${n} stream(s) parado(s)` : 'Nenhum stream ativo',
+  });
 });
 
 // ========== GIT ==========
