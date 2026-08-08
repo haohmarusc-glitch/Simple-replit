@@ -171,10 +171,13 @@ app.post('/api/run', rateLimit(20, 60_000), (req, res) => {
           sandbox: meta && meta.sandbox,
         });
       }
+      const ok = !error;
+      // stderr do docker pull na 1ª execução não é falha do script
+      const errText = ok ? '' : (stderr || (error && error.message) || '').toString();
       res.json({
-        success: !error,
+        success: ok,
         output: stdout || '',
-        error: (stderr || (error ? error.message : '') || '').toString(),
+        error: errText,
         sandbox: meta && meta.sandbox,
       });
     };
