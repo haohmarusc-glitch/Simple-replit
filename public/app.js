@@ -887,15 +887,42 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// Bottom nav mobile
+function openSideNav() {
+  document.body.classList.add('nav-open');
+  document.getElementById('bottomNav')?.classList.add('open');
+  const bd = document.getElementById('sideNavBackdrop');
+  if (bd) bd.style.display = 'block';
+}
+
+function closeSideNav() {
+  document.body.classList.remove('nav-open');
+  document.getElementById('bottomNav')?.classList.remove('open');
+  const bd = document.getElementById('sideNavBackdrop');
+  if (bd) bd.style.display = 'none';
+}
+
+document.getElementById('btnToggleSideNav')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  openSideNav();
+});
+
+document.getElementById('sideNavBackdrop')?.addEventListener('click', closeSideNav);
+
+// Side nav mobile (lateral esquerda)
 document.querySelectorAll('#bottomNav .bnav-item').forEach(btn => {
   btn.addEventListener('click', () => {
+    if (btn.dataset.action === 'close-nav') {
+      closeSideNav();
+      return;
+    }
     if (btn.dataset.action === 'more') {
+      closeSideNav();
       openSheet();
       return;
     }
     closeSheet();
     setMobileView(btn.dataset.view);
+    closeSideNav();
   });
 });
 

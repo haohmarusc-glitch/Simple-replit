@@ -131,7 +131,12 @@
       </div>
     </div>
 
-    <nav id="bottomNav" class="bottom-nav mobile-only" aria-label="Navegação mobile">
+    <button type="button" id="btnToggleSideNav" class="side-nav-toggle mobile-only" title="Menu" aria-label="Abrir menu">⋯</button>
+    <nav id="bottomNav" class="side-nav mobile-only" aria-label="Navegação mobile">
+      <button type="button" class="bnav-item" data-action="close-nav" title="Fechar">
+        <span class="bnav-icon">⋯</span>
+        <span class="bnav-label">Fechar</span>
+      </button>
       <button type="button" class="bnav-item active" data-view="files" title="Arquivos">
         <span class="bnav-icon">📁</span>
         <span class="bnav-label">Arquivos</span>
@@ -140,7 +145,7 @@
         <span class="bnav-icon">✏️</span>
         <span class="bnav-label">Código</span>
       </button>
-      <button type="button" class="bnav-item" data-view="console" title="Console / Shell">
+      <button type="button" class="bnav-item" data-view="console" title="Console">
         <span class="bnav-icon">💻</span>
         <span class="bnav-label">Console</span>
       </button>
@@ -149,10 +154,11 @@
         <span class="bnav-label">AI</span>
       </button>
       <button type="button" class="bnav-item" data-action="more" title="Mais">
-        <span class="bnav-icon">⋯</span>
+        <span class="bnav-icon">⚡</span>
         <span class="bnav-label">Mais</span>
       </button>
     </nav>
+    <div id="sideNavBackdrop" class="side-nav-backdrop mobile-only" style="display:none;"></div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
