@@ -8,12 +8,34 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Pastas
-const WORKSPACE = path.join(__dirname, 'workspace');
+// ========== CONFIGURAÇÃO ==========
+// Na VPS você pode apontar para o código do Premercado:
+// WORKSPACE_PATH=/caminho/para/Premercado node server.js
+const WORKSPACE = process.env.WORKSPACE_PATH
+  ? path.resolve(process.env.WORKSPACE_PATH)
+  : path.join(__dirname, 'workspace');
+
 const PUBLIC = path.join(__dirname, 'public');
 
-// Garante que a pasta workspace existe
-if (!fs.existsSync(WORKSPACE)) {
+// Pastas/arquivos que devem ser ignorados (para não explodir com monorepos grandes)
+const IGNORE = new Set([
+  'node_modules',
+  '.git',
+  '.next',
+  'dist',
+  'build',
+  '.cache',
+  'coverage',
+  '__pycache__',
+  '.temp',
+  '.DS_Store',
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'yarn.lock'
+]);
+
+// Garante que a pasta workspace existe (só se for a pasta padrão)
+if (!process.env.WORKSPACE_PATH && !fs.existsSync(WORKSPACE)) {
   fs.mkdirSync(WORKSPACE, { recursive: true });
 }
 
@@ -23,26 +45,37 @@ app.use(express.static(PUBLIC));
 
 // ========== HELPERS ==========
 function getSafePath(userPath) {
-  // Evita path traversal
   const resolved = path.resolve(WORKSPACE, userPath || '');
   if (!resolved.startsWith(WORKSPACE)) {
-    throw new Error('Caminho inválido');
+    throw new Error('Caminho inválido (path traversal bloqueado)');
   }
   return resolved;
 }
 
-function listFiles(dir, base = '') {
+function listFiles(dir, base = '', depth = 0) {
+  // Limita profundidade para monorepos grandes (evita travar)
+  if (depth > 6) return [];
+
   const items = [];
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (e) {
+    return [];
+  }
 
   for (const entry of entries) {
+    if (IGNORE.has(entry.name) || entry.name.startsWith('.')) continue;
+
     const relative = path.join(base, entry.name);
+    const full = path.join(dir, entry.name);
+
     if (entry.isDirectory()) {
       items.push({
         name: entry.name,
         path: relative,
         type: 'folder',
-        children: listFiles(path.join(dir, entry.name), relative)
+        children: listFiles(full, relative, depth + 1)
       });
     } else {
       items.push({
@@ -52,27 +85,40 @@ function listFiles(dir, base = '') {
       });
     }
   }
+
+  // Ordena: pastas primeiro, depois arquivos
+  items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
   return items;
 }
 
 // ========== API DE ARQUIVOS ==========
 
-// Listar arquivos
 app.get('/api/files', (req, res) => {
   try {
+    if (!fs.existsSync(WORKSPACE)) {
+      return res.json({ success: true, files: [], message: 'Workspace não encontrado' });
+    }
     const files = listFiles(WORKSPACE);
-    res.json({ success: true, files });
+    res.json({ success: true, files, workspace: WORKSPACE });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Ler arquivo
 app.get('/api/file', (req, res) => {
   try {
     const filePath = getSafePath(req.query.path);
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       return res.status(404).json({ success: false, error: 'Arquivo não encontrado' });
+    }
+    // Limite de tamanho para não travar o browser (2 MB)
+    const stats = fs.statSync(filePath);
+    if (stats.size > 2 * 1024 * 1024) {
+      return res.status(400).json({ success: false, error: 'Arquivo muito grande (> 2MB)' });
     }
     const content = fs.readFileSync(filePath, 'utf8');
     res.json({ success: true, content });
@@ -81,7 +127,6 @@ app.get('/api/file', (req, res) => {
   }
 });
 
-// Salvar / criar arquivo
 app.post('/api/file', (req, res) => {
   try {
     const { path: filePath, content } = req.body;
@@ -101,7 +146,6 @@ app.post('/api/file', (req, res) => {
   }
 });
 
-// Criar pasta
 app.post('/api/folder', (req, res) => {
   try {
     const { path: folderPath } = req.body;
@@ -115,7 +159,6 @@ app.post('/api/folder', (req, res) => {
   }
 });
 
-// Renomear
 app.put('/api/rename', (req, res) => {
   try {
     const { oldPath, newPath } = req.body;
@@ -137,7 +180,6 @@ app.put('/api/rename', (req, res) => {
   }
 });
 
-// Deletar
 app.delete('/api/file', (req, res) => {
   try {
     const filePath = req.query.path;
@@ -187,19 +229,25 @@ app.post('/api/run', (req, res) => {
       fs.writeFileSync(tempFile, code, 'utf8');
       command = `python3 "${tempFile}"`;
     } else {
-      return res.status(400).json({ success: false, error: 'Linguagem não suportada. Use python ou javascript.' });
+      return res.status(400).json({
+        success: false,
+        error: 'Linguagem não suportada para execução. Use python ou javascript.'
+      });
     }
 
-    // Timeout de 10 segundos
-    exec(command, { timeout: 10000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
-      // Limpa o arquivo temporário
+    // Timeout de 15 segundos
+    exec(command, {
+      timeout: 15000,
+      maxBuffer: 2 * 1024 * 1024,
+      cwd: WORKSPACE
+    }, (error, stdout, stderr) => {
       try { if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile); } catch (e) {}
 
       if (error && error.killed) {
         return res.json({
           success: false,
           output: '',
-          error: 'Tempo limite excedido (10s)'
+          error: 'Tempo limite excedido (15s)'
         });
       }
 
@@ -214,12 +262,24 @@ app.post('/api/run', (req, res) => {
   }
 });
 
-// Rota fallback para SPA
+// Info do workspace (útil para debug)
+app.get('/api/info', (req, res) => {
+  res.json({
+    workspace: WORKSPACE,
+    exists: fs.existsSync(WORKSPACE),
+    port: PORT
+  });
+});
+
+// Fallback SPA
 app.get('*', (req, res) => {
   res.sendFile(path.join(PUBLIC, 'index.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(`Simple Replit rodando em http://localhost:${PORT}`);
-  console.log(`Workspace: ${WORKSPACE}`);
+  console.log(`\n========================================`);
+  console.log(`  Simple Replit rodando`);
+  console.log(`  http://localhost:${PORT}`);
+  console.log(`  Workspace: ${WORKSPACE}`);
+  console.log(`========================================\n`);
 });
