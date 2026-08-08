@@ -664,10 +664,14 @@ function addAiMessage(role, content, files) {
   aiMessagesEl.scrollTop = aiMessagesEl.scrollHeight;
 }
 
-async function sendAiMessage() {
-  const text = aiInput.value.trim();
+async function sendAiMessage(presetText) {
+  const text = (presetText || aiInput.value).trim();
   if (!text) return;
-  aiInput.value = '';
+  if (!presetText) aiInput.value = '';
+
+  const btnSend = document.getElementById('btnAiSend');
+  if (btnSend) btnSend.disabled = true;
+
   aiMessages.push({ role: 'user', content: text });
   addAiMessage('user', text);
 
@@ -700,15 +704,23 @@ async function sendAiMessage() {
   } catch (err) {
     document.getElementById('aiThinking')?.remove();
     addAiMessage('assistant', 'Erro de conexão: ' + err.message);
+  } finally {
+    if (btnSend) btnSend.disabled = false;
   }
 }
 
-document.getElementById('btnAiSend').onclick = sendAiMessage;
+document.getElementById('btnAiSend').onclick = () => sendAiMessage();
 aiInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendAiMessage();
   }
+});
+
+document.querySelectorAll('.ai-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    sendAiMessage(chip.dataset.prompt);
+  });
 });
 
 // Status das keys no load

@@ -1,0 +1,31 @@
+# Stack leve de monitoramento (Uptime Kuma + Dozzle)
+# Na VPS: colocar em /opt/monitoring e subir com docker compose
+#
+# Uptime Kuma: avisa se o site cair
+# Dozzle: logs Docker no browser
+
+name: monitoring
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - uptime-kuma-data:/app/data
+    ports:
+      - "127.0.0.1:3001:3001"
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "127.0.0.1:8081:8080"
+    environment:
+      DOZZLE_NO_ANALYTICS: "true"
+
+volumes:
+  uptime-kuma-data:

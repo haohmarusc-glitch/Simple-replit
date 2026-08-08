@@ -436,12 +436,47 @@ body {
   cursor: pointer;
 }
 
+.ai-quick-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: #0a0a0a;
+  flex-shrink: 0;
+}
+
+.ai-chip {
+  background: #1a1a2e;
+  border: 1px solid #2e2e4a;
+  color: #a5b4fc;
+  border-radius: 16px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  min-height: 36px;
+}
+
+.ai-chip:active {
+  background: #2a2a4e;
+}
+
+body.mode-mobile .ai-chip {
+  min-height: 40px;
+  font-size: 13px;
+}
+
 .ai-input-row {
   display: flex;
   gap: 8px;
   padding: 8px 10px;
   border-top: 1px solid var(--border);
   background: #0a0a0a;
+}
+
+#btnAiSend:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 #aiInput {

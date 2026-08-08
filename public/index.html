@@ -94,9 +94,16 @@
             <input id="shellInput" type="text" placeholder="Digite o comando e pressione Enter..." autocomplete="off" />
           </div>
           <div id="aiChatArea" class="ai-chat-area" style="display:none;">
+            <div id="aiQuickPrompts" class="ai-quick-prompts">
+              <button type="button" class="ai-chip" data-prompt="Explique o arquivo aberto de forma simples">Explicar arquivo</button>
+              <button type="button" class="ai-chip" data-prompt="Encontre bugs ou problemas no código aberto e sugira correção">Achar bugs</button>
+              <button type="button" class="ai-chip" data-prompt="Melhore este código mantendo a mesma função">Melhorar código</button>
+              <button type="button" class="ai-chip" data-prompt="Crie um arquivo Python hello.py que imprime Olá">Criar hello.py</button>
+              <button type="button" class="ai-chip" data-prompt="Liste os arquivos importantes deste projeto e o que cada um faz">Mapear projeto</button>
+            </div>
             <div id="aiMessages" class="ai-messages"></div>
             <div class="ai-input-row">
-              <textarea id="aiInput" rows="2" placeholder="Peça para criar/editar código... (Enter envia, Shift+Enter nova linha)"></textarea>
+              <textarea id="aiInput" rows="2" placeholder="Descreva o que quer criar ou mudar..."></textarea>
               <button id="btnAiSend" class="btn btn-primary">Enviar</button>
             </div>
           </div>
