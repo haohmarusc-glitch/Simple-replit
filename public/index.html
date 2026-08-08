@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simple Replit</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Monaco Editor -->
+  <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/editor/editor.main.min.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Top bar -->
+    <header class="topbar">
+      <div class="logo">
+        <span class="logo-icon">◈</span>
+        <span>Simple Replit</span>
+      </div>
+      <div class="top-actions">
+        <select id="languageSelect" title="Linguagem">
+          <option value="python">Python</option>
+          <option value="javascript">JavaScript</option>
+          <option value="html">HTML</option>
+          <option value="css">CSS</option>
+          <option value="markdown">Markdown</option>
+        </select>
+        <button id="btnRun" class="btn btn-primary" title="Rodar (Ctrl+Enter)">
+          ▶ Rodar
+        </button>
+        <button id="btnSave" class="btn" title="Salvar (Ctrl+S)">
+          💾 Salvar
+        </button>
+      </div>
+    </header>
+
+    <div class="main">
+      <!-- Sidebar - File Explorer -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <span>Arquivos</span>
+          <div class="sidebar-actions">
+            <button id="btnNewFile" title="Novo arquivo">＋</button>
+            <button id="btnNewFolder" title="Nova pasta">📁</button>
+            <button id="btnRefresh" title="Atualizar">↻</button>
+          </div>
+        </div>
+        <div id="fileTree" class="file-tree"></div>
+      </aside>
+
+      <!-- Editor + Console -->
+      <div class="editor-area">
+        <div id="editor" class="editor"></div>
+        <div class="console-panel">
+          <div class="console-header">
+            <span>Console</span>
+            <button id="btnClearConsole" class="btn-small">Limpar</button>
+          </div>
+          <pre id="consoleOutput" class="console-output"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monaco loader -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

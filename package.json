@@ -1,0 +1,18 @@
+{
+  "name": "simple-replit",
+  "version": "1.0.0",
+  "description": "App simples estilo Replit - MVP",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["replit", "ide", "editor", "python", "javascript"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "uuid": "^10.0.0"
+  }
+}
