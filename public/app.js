@@ -210,11 +210,20 @@ function renderFileTree() {
         }
       };
 
-      // Menu de contexto simples (botão direito)
+      // Menu de contexto (botão direito / long-press)
       div.oncontextmenu = (e) => {
         e.preventDefault();
         showContextMenu(e, item);
       };
+      let pressTimer = null;
+      div.addEventListener('touchstart', (e) => {
+        pressTimer = setTimeout(() => {
+          const t = e.touches[0];
+          showContextMenu({ clientX: t.clientX, clientY: t.clientY, preventDefault() {} }, item);
+        }, 550);
+      }, { passive: true });
+      div.addEventListener('touchend', () => clearTimeout(pressTimer));
+      div.addEventListener('touchmove', () => clearTimeout(pressTimer));
 
       parent.appendChild(div);
 
@@ -281,7 +290,7 @@ async function openFile(filePath) {
 async function saveCurrentFile() {
   if (!currentFile) {
     // Se não tem arquivo aberto, pergunta o nome
-    const name = prompt('Nome do arquivo (ex: main.py):');
+    const name = await promptName('Nome do arquivo', 'main.py');
     if (!name) return;
     currentFile = name;
   }
@@ -310,7 +319,7 @@ async function saveCurrentFile() {
 
 // ========== NEW FILE / FOLDER ==========
 document.getElementById('btnNewFile').onclick = async () => {
-  const name = prompt('Nome do novo arquivo (ex: script.py):');
+  const name = await promptName('Novo arquivo', 'script.py');
   if (!name) return;
 
   try {
@@ -332,7 +341,7 @@ document.getElementById('btnNewFile').onclick = async () => {
 };
 
 document.getElementById('btnNewFolder').onclick = async () => {
-  const name = prompt('Nome da nova pasta:');
+  const name = await promptName('Nova pasta', 'nova-pasta');
   if (!name) return;
 
   try {
@@ -354,18 +363,92 @@ document.getElementById('btnNewFolder').onclick = async () => {
 
 document.getElementById('btnRefresh').onclick = () => loadFiles();
 
-// ========== CONTEXT MENU (simples) ==========
+// ========== CONTEXT MENU ==========
+function hideCtxMenu() {
+  const m = document.getElementById('ctxMenu');
+  if (m) m.style.display = 'none';
+}
+
 function showContextMenu(e, item) {
-  const action = prompt(`Ação para "${item.name}":\n1 = Renomear\n2 = Deletar\n\nDigite 1 ou 2:`);
-  if (action === '1') {
-    const newName = prompt('Novo nome:', item.name);
-    if (!newName || newName === item.name) return;
-    renameItem(item.path, newName);
-  } else if (action === '2') {
-    if (confirm(`Deletar "${item.name}"?`)) {
-      deleteItem(item.path);
-    }
+  hideCtxMenu();
+  let menu = document.getElementById('ctxMenu');
+  if (!menu) {
+    menu = document.createElement('div');
+    menu.id = 'ctxMenu';
+    document.body.appendChild(menu);
+    document.addEventListener('click', hideCtxMenu);
   }
+  menu.innerHTML = '';
+  const title = document.createElement('div');
+  title.className = 'ctx-title';
+  title.textContent = item.name;
+  menu.appendChild(title);
+
+  const actions = [
+    item.type === 'file' ? { label: 'Abrir', fn: () => openFile(item.path) } : null,
+    { label: 'Renomear', fn: () => promptName('Novo nome', item.name).then((n) => n && n !== item.name && renameItem(item.path, n)) },
+    { label: 'Deletar', danger: true, fn: () => promptConfirm('Deletar "' + item.name + '"?').then((ok) => ok && deleteItem(item.path)) },
+  ].filter(Boolean);
+
+  actions.forEach((a) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ctx-item' + (a.danger ? ' danger' : '');
+    b.textContent = a.label;
+    b.onclick = (ev) => {
+      ev.stopPropagation();
+      hideCtxMenu();
+      a.fn();
+    };
+    menu.appendChild(b);
+  });
+
+  menu.style.display = 'block';
+  const x = Math.min(e.clientX || 16, window.innerWidth - 200);
+  const y = Math.min(e.clientY || 80, window.innerHeight - 180);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+}
+
+function promptName(title, value) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal-box"><h3>${title}</h3>
+      <input id="modalInput" type="text" value="${(value || '').replace(/"/g, '&quot;')}" />
+      <div class="modal-actions">
+        <button type="button" class="btn" data-act="cancel">Cancelar</button>
+        <button type="button" class="btn btn-primary" data-act="ok">OK</button>
+      </div></div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#modalInput');
+    setTimeout(() => { input.focus(); input.select(); }, 50);
+    const close = (v) => { overlay.remove(); resolve(v); };
+    overlay.querySelector('[data-act=cancel]').onclick = () => close(null);
+    overlay.querySelector('[data-act=ok]').onclick = () => close(input.value.trim() || null);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') close(input.value.trim() || null);
+      if (e.key === 'Escape') close(null);
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+  });
+}
+
+function promptConfirm(msg) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal-box"><h3>Confirmar</h3><p>${msg}</p>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-act="cancel">Cancelar</button>
+        <button type="button" class="btn btn-danger" data-act="ok">Deletar</button>
+      </div></div>`;
+    document.body.appendChild(overlay);
+    const close = (v) => { overlay.remove(); resolve(v); };
+    overlay.querySelector('[data-act=cancel]').onclick = () => close(false);
+    overlay.querySelector('[data-act=ok]').onclick = () => close(true);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+  });
 }
 
 async function renameItem(oldPath, newName) {
@@ -518,8 +601,8 @@ document.getElementById('btnGitPush').onclick = () => {
   gitAction('/api/git/push', 'POST');
 };
 
-document.getElementById('btnGitCommit').onclick = () => {
-  const message = prompt('Mensagem do commit:');
+document.getElementById('btnGitCommit').onclick = async () => {
+  const message = await promptName('Mensagem do commit', 'update');
   if (!message) return;
   appendConsole('info', '── git add + commit ──');
   gitAction('/api/git/commit', 'POST', { message });
