@@ -112,6 +112,16 @@ body {
   padding: 5px 10px;
 }
 
+.btn-logs {
+  background: #3a2a00;
+  border-color: #6b5200;
+  color: #fbbf24;
+}
+
+.btn-logs:hover {
+  background: #4a3600;
+}
+
 .btn-small {
   background: transparent;
   border: none;

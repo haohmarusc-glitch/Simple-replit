@@ -443,3 +443,41 @@ shellInput.addEventListener('keydown', (e) => {
     runShellCommand(cmd);
   }
 });
+
+// ========== LOGS RÁPIDOS ==========
+document.getElementById('btnLogs').onclick = async () => {
+  // Troca para aba Shell visualmente
+  document.querySelectorAll('.console-tabs .tab').forEach(t => t.classList.remove('active'));
+  const shellTab = document.querySelector('.console-tabs .tab[data-tab="shell"]');
+  if (shellTab) shellTab.classList.add('active');
+  shellInputArea.style.display = 'flex';
+
+  appendConsole('info', '── Buscando logs de deploy ──');
+
+  // Tenta vários comandos comuns em ordem
+  const commands = [
+    'docker compose logs --tail 80 2>/dev/null || docker-compose logs --tail 80 2>/dev/null',
+    'pm2 logs --lines 50 --nostream 2>/dev/null',
+    'journalctl -u premercado -n 50 --no-pager 2>/dev/null || journalctl -u docker -n 30 --no-pager 2>/dev/null',
+    'ls -la *.log logs/ 2>/dev/null; tail -n 40 *.log 2>/dev/null; tail -n 40 logs/*.log 2>/dev/null'
+  ];
+
+  for (const cmd of commands) {
+    appendConsole('info', `$ ${cmd.split(' || ')[0]}...`);
+    try {
+      const res = await fetch('/api/shell', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd })
+      });
+      const data = await res.json();
+      if (data.output && data.output.length > 5) {
+        appendConsole('stdout', data.output);
+        appendConsole('info', '✔ Logs encontrados');
+        return;
+      }
+    } catch (e) {}
+  }
+
+  appendConsole('info', 'Nenhum log automático encontrado. Use o Shell e digite o comando manualmente (ex: docker compose logs)');
+};
