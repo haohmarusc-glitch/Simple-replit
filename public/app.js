@@ -44,6 +44,7 @@ function getAuthToken() {
 function setAuthToken(t) {
   if (t) localStorage.setItem(AUTH_KEY, t);
   else localStorage.removeItem(AUTH_KEY);
+  try { window.dispatchEvent(new Event('sr-auth')); } catch (_) {}
 }
 function authHeaders(extra = {}) {
   const t = getAuthToken();
@@ -2134,11 +2135,20 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.getElementById('aiOverlay')) closeAiPanel();
 });
 
-fetch('/api/ai/status').then((r) => r.json()).then((s) => {
-  if (!s.groq && !s.deepseek) {
-    console.warn('Nenhuma API key de IA configurada (GROQ_API_KEY / DEEPSEEK_API_KEY)');
-  }
-}).catch(() => {});
+// Só após login (precisa AUTH_TOKEN); sem header → 401 e aviso falso de “sem key”
+function checkAiKeysStatus() {
+  if (!getAuthToken()) return;
+  fetch('/api/ai/status', { headers: authHeaders() })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((s) => {
+      if (s && !s.groq && !s.deepseek) {
+        console.warn('Nenhuma API key de IA configurada (GROQ_API_KEY / DEEPSEEK_API_KEY)');
+      }
+    })
+    .catch(() => {});
+}
+checkAiKeysStatus();
+window.addEventListener('sr-auth', checkAiKeysStatus);
 
 // ========== MODO PC / CELULAR ==========
 const modeSelect = document.getElementById('modeSelect');
