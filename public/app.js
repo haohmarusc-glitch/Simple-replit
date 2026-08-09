@@ -1402,7 +1402,17 @@ function showConsoleTab(name) {
 }
 
 document.querySelectorAll('.console-tabs .tab').forEach((tab) => {
-  tab.onclick = () => showConsoleTab(tab.dataset.tab);
+  tab.onclick = () => {
+    const name = tab.dataset.tab;
+    if (document.body.classList.contains('mode-mobile') && typeof setMobileView === 'function') {
+      // Alinha a view mobile com a aba (console/shell/ai)
+      if (name === 'shell') setMobileView('shell');
+      else if (name === 'ai') setMobileView('agent');
+      else setMobileView('console');
+      return;
+    }
+    showConsoleTab(name);
+  };
 });
 
 // clear also clears xterm when on shell
@@ -2116,24 +2126,35 @@ function setMobileView(view) {
     btn.classList.toggle('active', btn.dataset.view === view);
   });
 
-  // Sincroniza tabs internas console/shell/ai
-  if (view === 'ai' || view === 'agent') {
-    showConsoleTab('ai');
-  } else if (view === 'shell') {
-    showConsoleTab('shell');
-  } else if (view === 'console') {
-    showConsoleTab('console');
-  } else if (view === 'actions') {
-    showConsoleTab('console');
-    if (typeof showActionsPanel === 'function') showActionsPanel();
-  }
-
-  setTimeout(() => {
-    if (typeof editor !== 'undefined' && editor) editor.layout();
-    if (view === 'shell' && typeof fitAddon !== 'undefined' && fitAddon) {
-      try { fitAddon.fit(); } catch (_) {}
+  // Tabs internas depois do CSS da view (evita painel com altura 0)
+  requestAnimationFrame(() => {
+    try {
+      if (view === 'ai' || view === 'agent') {
+        showConsoleTab('ai');
+      } else if (view === 'shell') {
+        showConsoleTab('shell');
+      } else if (view === 'console') {
+        showConsoleTab('console');
+      } else if (view === 'actions') {
+        showConsoleTab('console');
+        if (typeof showActionsPanel === 'function') showActionsPanel();
+      }
+    } catch (err) {
+      console.error('setMobileView tab error', err);
     }
-  }, 80);
+
+    setTimeout(() => {
+      if (typeof editor !== 'undefined' && editor) {
+        try { editor.layout(); } catch (_) {}
+      }
+      if ((view === 'shell' || view === 'console') && typeof fitAddon !== 'undefined' && fitAddon) {
+        try { fitAddon.fit(); } catch (_) {}
+      }
+      if (view === 'shell' && typeof term !== 'undefined' && term) {
+        try { term.focus(); } catch (_) {}
+      }
+    }, 120);
+  });
 }
 
 function updateBreadcrumb(path) {

@@ -1028,47 +1028,72 @@ body.mode-mobile .editor-area {
 }
 
 body.mode-mobile .console-panel {
-  height: auto !important;
-  min-height: 0;
-  flex: 1;
   display: none;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  flex-shrink: 1;
+}
+
+/* Full-screen console/shell/ai/agent panes on mobile */
+body.mode-mobile.view-files .sidebar { display: flex !important; }
+
+body.mode-mobile.view-code .editor-area { display: flex !important; }
+body.mode-mobile.view-code .console-panel { display: none !important; }
+body.mode-mobile.view-code #editor { display: block !important; flex: 1; min-height: 0; }
+
+body.mode-mobile.view-console .editor-area,
+body.mode-mobile.view-shell .editor-area,
+body.mode-mobile.view-ai .editor-area,
+body.mode-mobile.view-agent .editor-area {
+  display: flex !important;
   flex-direction: column;
 }
 
-body.mode-mobile.view-files .sidebar { display: flex !important; }
-body.mode-mobile.view-code .editor-area { display: flex !important; }
-body.mode-mobile.view-code .console-panel { display: none !important; }
-body.mode-mobile.view-code #editor { display: block !important; flex: 1; }
+body.mode-mobile.view-console #editor,
+body.mode-mobile.view-shell #editor,
+body.mode-mobile.view-ai #editor,
+body.mode-mobile.view-agent #editor {
+  display: none !important;
+}
 
-body.mode-mobile.view-console .editor-area { display: flex !important; }
-body.mode-mobile.view-console #editor { display: none !important; }
-body.mode-mobile.view-console .console-panel { display: flex !important; flex: 1; }
+body.mode-mobile.view-console .editor-tabs,
+body.mode-mobile.view-shell .editor-tabs,
+body.mode-mobile.view-ai .editor-tabs,
+body.mode-mobile.view-agent .editor-tabs {
+  display: none !important;
+}
 
-body.mode-mobile.view-shell .editor-area { display: flex !important; }
-body.mode-mobile.view-shell #editor { display: none !important; }
-body.mode-mobile.view-shell .console-panel { display: flex !important; flex: 1; }
-
-body.mode-mobile.view-ai .editor-area { display: flex !important; }
-body.mode-mobile.view-ai #editor { display: none !important; }
-body.mode-mobile.view-ai .console-panel { display: flex !important; flex: 1; }
-
-body.mode-mobile.view-agent .editor-area { display: flex !important; }
-body.mode-mobile.view-agent #editor { display: none !important; }
-body.mode-mobile.view-agent .console-panel { display: flex !important; flex: 1; }
-
-body.mode-mobile #aiInput { font-size: 16px; }
-
-body.mode-mobile .console-panel.shell-active {
-  height: auto;
+body.mode-mobile.view-console .console-panel,
+body.mode-mobile.view-shell .console-panel,
+body.mode-mobile.view-ai .console-panel,
+body.mode-mobile.view-agent .console-panel {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  border-top: none;
 }
 
 body.mode-mobile.view-console .console-panel.shell-active,
-body.mode-mobile.view-console .xterm-container,
 body.mode-mobile.view-shell .console-panel.shell-active,
-body.mode-mobile.view-shell .xterm-container {
-  flex: 1;
-  min-height: 0;
+body.mode-mobile.view-ai .console-panel.shell-active,
+body.mode-mobile.view-agent .console-panel.shell-active {
+  height: 100% !important;
 }
+
+body.mode-mobile.view-console .console-output,
+body.mode-mobile.view-console .xterm-container,
+body.mode-mobile.view-shell .xterm-container,
+body.mode-mobile.view-ai .ai-chat-area,
+body.mode-mobile.view-agent .ai-chat-area {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+}
+
+body.mode-mobile #aiInput { font-size: 16px; }
 
 body.mode-mobile .file-tree { font-size: 15px; padding: 8px; }
 
