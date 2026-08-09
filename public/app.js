@@ -1862,7 +1862,21 @@ document.querySelectorAll('.ai-chip').forEach((chip) => {
   chip.addEventListener('click', () => sendAiMessage(chip.dataset.prompt));
 });
 
-const agentMessages = [];
+const AGENT_MEM_KEY = 'simple-replit-agent-messages';
+let agentMessages = [];
+try {
+  const raw = localStorage.getItem(AGENT_MEM_KEY);
+  if (raw) {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) agentMessages = parsed.slice(-40);
+  }
+} catch (_) {}
+
+function persistAgentMessages() {
+  try {
+    localStorage.setItem(AGENT_MEM_KEY, JSON.stringify(agentMessages.slice(-40)));
+  } catch (_) {}
+}
 
 function closeAiPanel() {
   document.getElementById('aiOverlay')?.remove();
@@ -1911,6 +1925,7 @@ function openAiPanel() {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeAiPanel(); });
   document.getElementById('aiPanelClear').onclick = () => {
     agentMessages.length = 0;
+    persistAgentMessages();
     document.getElementById('aiPanelMessages').innerHTML = '';
   };
   const msgBox = document.getElementById('aiPanelMessages');
@@ -1929,6 +1944,7 @@ function openAiPanel() {
     if (!t) return;
     if (input) input.value = '';
     agentMessages.push({ role: 'user', content: t });
+    persistAgentMessages();
     addPanelMsg('user', t);
     const agentOn = document.getElementById('aiAgentMode')?.checked !== false;
     const model = document.getElementById('aiPanelModel')?.value || 'deepseek-flash';
@@ -1971,6 +1987,7 @@ function openAiPanel() {
       }
       const content = data.content || '(sem texto)';
       agentMessages.push({ role: 'assistant', content });
+      persistAgentMessages();
       addPanelMsg('assistant', content);
       if (data.files && data.files.length) {
         for (const f of data.files) {

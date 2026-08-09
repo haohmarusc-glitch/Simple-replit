@@ -1358,39 +1358,72 @@ app.post('/api/ai/chat', async (req, res) => {
 
 // ========== AI AGENT (ferramentas = poder do app) ==========
 const AGENT_TOOLS = [
-  { type: 'function', function: { name: 'list_files', description: 'Lista arquivos do workspace', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'read_file', description: 'Lê arquivo do workspace', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
-  { type: 'function', function: { name: 'write_file', description: 'Cria/edita arquivo', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
-  { type: 'function', function: { name: 'delete_path', description: 'Apaga arquivo ou pasta', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+  { type: 'function', function: { name: 'list_files', description: 'Lista arquivos do workspace (árvore). Preferir isto a find/ls longos.', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'read_file', description: 'Lê arquivo do workspace por path relativo', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+  { type: 'function', function: { name: 'write_file', description: 'Cria ou edita arquivo no workspace', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
+  { type: 'function', function: { name: 'delete_path', description: 'Apaga arquivo/pasta. Só se o usuário pediu explicitamente.', parameters: { type: 'object', properties: { path: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['path', 'confirm'] } } },
+  { type: 'function', function: { name: 'search_code', description: 'Busca texto no código do workspace (grep seguro).', parameters: { type: 'object', properties: { query: { type: 'string' }, glob: { type: 'string', description: 'ex: *.py ou *.ts' } }, required: ['query'] } } },
   { type: 'function', function: { name: 'run_code', description: 'Executa python ou javascript', parameters: { type: 'object', properties: { language: { type: 'string' }, code: { type: 'string' } }, required: ['language', 'code'] } } },
-  { type: 'function', function: { name: 'shell', description: 'Comando shell (whitelist)', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } },
-  { type: 'function', function: { name: 'git_summary', description: 'Status e log git', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'shell', description: 'Shell whitelist. cwd já é o workspace — NÃO use cd /opt/...', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } },
+  { type: 'function', function: { name: 'git_summary', description: 'Status git + log', parameters: { type: 'object', properties: {} } } },
   { type: 'function', function: { name: 'git_diff', description: 'git diff', parameters: { type: 'object', properties: { path: { type: 'string' } } } } },
   { type: 'function', function: { name: 'git_commit', description: 'add -A + commit', parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } } },
   { type: 'function', function: { name: 'git_pull', description: 'git pull --ff-only', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'git_push', description: 'git push', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'git_push', description: 'git push — só se usuário pediu', parameters: { type: 'object', properties: { confirm: { type: 'boolean' } }, required: ['confirm'] } } },
+  { type: 'function', function: { name: 'portfolio_list', description: 'Lista posições da carteira do Premercado (fonte da verdade: API/DB).', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'app_status', description: 'Status docker compose / app Premercado', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'project_map', description: 'Mapa fixo do projeto Premercado (pastas e responsabilidades).', parameters: { type: 'object', properties: {} } } },
 ];
 
-const AGENT_SYSTEM = `Você é o agente do Simple Replit na VPS.
-Responda em português. Se o usuário pedir para FAZER algo, USE as ferramentas (não só explique).
+const PREMERCADO_MAP = `
+Mapa do workspace Premercado (cwd do shell = raiz do repo):
+- artifacts/api-server/     → API Node (rotas, runner do agente)
+- artifacts/api-server/src/agent/ → agente Python (config.py, tools)
+- artifacts/api-server/src/routes/portfolio.ts → API da carteira
+- artifacts/premarket/      → frontend (inclui pages/portfolio.tsx)
+- lib/db/                   → schema Drizzle / migrations
+- deploy-panel/             → painel de deploy
+- .env                      → secrets (não vazar valores completos)
+
+Carteira do agente:
+- FONTE DA VERDADE = posições no banco via API /portfolio (edição na tela Portfolio do app).
+- AGENT_PORTFOLIO_TICKERS no .env é só fallback quando roda fora do servidor.
+- config.py PORTFOLIO_TICKERS é último recurso para scripts manuais.
+- NÃO diga para editar só a lista fixa em config.py se o usuário usa o app em produção.
+
+Arquivos úteis: artifacts/api-server/src/lib/runner.ts, artifacts/api-server/src/agent/config.py, artifacts/api-server/src/agent/portfolio_snapshot.py
+`;
+
+const AGENT_SYSTEM = `Você é o agente do Simple Replit na VPS do Premercado.
+Responda em português. Se o usuário pedir para FAZER algo, USE as ferramentas.
+
+${PREMERCADO_MAP}
 
 Regras de execução:
-- Leia arquivos antes de editar.
-- Não exponha secrets completos na resposta final.
-- git_push/delete só se o usuário pediu explicitamente.
+- Prefira project_map, list_files, search_code, read_file antes de shell/find.
+- Shell: cwd já é o workspace. Proibido depender de cd /opt/premercado. Evite && longos e aspas quebradas.
+- Leia antes de editar. Não exponha secrets completos.
+- delete_path e git_push exigem confirm=true E pedido explícito do usuário.
+- Para carteira: use portfolio_list. Ajuste real = UI/API do app, não só config.py.
 
-Regras quando uma ferramenta FALHAR (ok=false ou error):
-1. NÃO diga só "Ações executadas".
-2. Reporte o erro de forma clara: ferramenta, comando/path e mensagem.
-3. Explique a causa provável (ex.: comando bloqueado pela whitelist, path fora do workspace, aspas quebradas, arquivo inexistente).
-4. Sugira a correção concreta (comando alternativo, path correto, usar list_files/read_file, ajustar código).
-5. Se puder, TENTE de novo com a abordagem corrigida na mesma conversa.
-6. No final use este formato:
-   **Feito:** …
-   **Erros:** …
-   **Sugestão:** …
+Falhas (ok=false):
+1. Não diga só "Ações executadas".
+2. Reporte ferramenta + erro + causa.
+3. Sugira correção e tente de novo se possível.
+4. Formato final: **Feito:** / **Erros:** / **Sugestão:**
+`;
 
-Shell: cwd já é o workspace — não precisa de "cd /opt/...". Evite && longos e aspas quebradas. Prefira list_files/read_file a find/grep complexos quando possível.`;
+function normalizeShellCommand(cmd) {
+  let c = String(cmd || '').trim();
+  // remove cd absoluto para o workspace
+  c = c.replace(/^cd\s+\/opt\/premercado\s*&&\s*/i, '');
+  c = c.replace(/^cd\s+\/opt\/premercado\s*;\s*/i, '');
+  c = c.replace(/\bcd\s+\/opt\/premercado\b/gi, 'true');
+  // paths absolutos do workspace → relativos
+  c = c.replace(/\/opt\/premercado\//g, './');
+  c = c.replace(/\/opt\/premercado\b/g, '.');
+  return c.trim();
+}
 
 function flattenTree(items, acc = []) {
   for (const it of items || []) {
@@ -1404,28 +1437,72 @@ async function runAgentTool(name, args) {
   const a = args || {};
   try {
     switch (name) {
+      case 'project_map':
+        return { ok: true, map: PREMERCADO_MAP };
+
       case 'list_files': {
         const flat = flattenTree(listFiles(WORKSPACE)).slice(0, 400);
         return { ok: true, count: flat.length, files: flat };
       }
+
       case 'read_file': {
         const full = getSafePath(a.path);
         if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return { ok: false, error: 'não encontrado' };
         const content = fs.readFileSync(full, 'utf8');
         return { ok: true, path: a.path, content: content.slice(0, 120000), truncated: content.length > 120000 };
       }
+
       case 'write_file': {
         const full = getSafePath(a.path);
         fs.mkdirSync(path.dirname(full), { recursive: true });
         fs.writeFileSync(full, String(a.content ?? ''), 'utf8');
         return { ok: true, path: a.path, bytes: Buffer.byteLength(String(a.content ?? ''), 'utf8') };
       }
+
       case 'delete_path': {
+        if (a.confirm !== true) {
+          return { ok: false, error: 'delete_path exige confirm=true e pedido explícito do usuário' };
+        }
         const full = getSafePath(a.path);
         if (!fs.existsSync(full)) return { ok: false, error: 'não existe' };
         fs.rmSync(full, { recursive: true, force: true });
         return { ok: true, deleted: a.path };
       }
+
+      case 'search_code': {
+        const q = String(a.query || '').trim();
+        if (!q || q.length < 2) return { ok: false, error: 'query curta' };
+        if (q.length > 80) return { ok: false, error: 'query longa' };
+        const glob = String(a.glob || '').trim();
+        const argsGrep = ['-r', '-n', '-I', '--exclude-dir=node_modules', '--exclude-dir=.git',
+          '--exclude-dir=dist', '--exclude-dir=build', '--exclude-dir=.next', '-m', '40', q, '.'];
+        if (glob && /^[\w*.-]+$/.test(glob)) {
+          argsGrep.splice(argsGrep.length - 2, 0, `--include=${glob}`);
+        }
+        return await new Promise((resolve) => {
+          const child = spawn('grep', argsGrep, { cwd: WORKSPACE, shell: false });
+          let stdout = '';
+          let stderr = '';
+          const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 20000);
+          child.stdout.on('data', (d) => { stdout += d.toString(); });
+          child.stderr.on('data', (d) => { stderr += d.toString(); });
+          child.on('close', (code) => {
+            clearTimeout(t);
+            // grep exit 1 = no matches
+            resolve({
+              ok: true,
+              matches: (stdout || '').slice(0, 15000),
+              empty: code === 1,
+              error: code > 1 ? (stderr || 'grep failed') : undefined,
+            });
+          });
+          child.on('error', (e) => {
+            clearTimeout(t);
+            resolve({ ok: false, error: e.message });
+          });
+        });
+      }
+
       case 'run_code': {
         const lang = (a.language === 'javascript' || a.language === 'js') ? 'js' : 'py';
         const id = uuidv4().slice(0, 8);
@@ -1439,7 +1516,8 @@ async function runAgentTool(name, args) {
             cwd: WORKSPACE, shell: false,
             env: { PATH: '/usr/local/bin:/usr/bin:/bin', HOME: WORKSPACE, LANG: 'C.UTF-8' },
           });
-          let stdout = '', stderr = '';
+          let stdout = '';
+          let stderr = '';
           const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch (_) {} }, 15000);
           child.stdout.on('data', (d) => { stdout += d.toString(); });
           child.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -1455,20 +1533,39 @@ async function runAgentTool(name, args) {
           });
         });
       }
+
       case 'shell': {
-        const cmd = String(a.command || '').trim();
+        let cmd = normalizeShellCommand(a.command);
         if (!cmd) return { ok: false, error: 'vazio' };
+        if (cmd.length > 4000) return { ok: false, error: 'comando longo' };
         for (const re of BLOCKED_PATTERNS) {
-          if (re.test(cmd)) return { ok: false, error: 'bloqueado' };
+          if (re.test(cmd)) {
+            return {
+              ok: false,
+              error: 'bloqueado por segurança',
+              hint: 'Use list_files, search_code ou read_file. Shell sem node -e / python -c / rm -rf /.',
+              normalized: cmd,
+            };
+          }
         }
         if (!SHELL_OPEN) {
           const first = shellFirstToken(cmd);
           const base = path.basename(first);
           if (!SHELL_WHITELIST.has(base) && !SHELL_WHITELIST.has(first)) {
-            return { ok: false, error: 'não permitido: ' + base };
+            return {
+              ok: false,
+              error: 'não permitido: ' + base,
+              hint: 'Whitelist: ls, cat, git, docker, grep, find… Código: use run_code.',
+              normalized: cmd,
+            };
           }
           if (/[;&`]|\$\(|<\(/.test(cmd) && !cmd.startsWith('git ')) {
-            return { ok: false, error: 'operadores bloqueados' };
+            return {
+              ok: false,
+              error: 'operadores ; & ` $() bloqueados',
+              hint: 'Rode um comando por vez. cwd já é o workspace.',
+              normalized: cmd,
+            };
           }
         }
         return await new Promise((resolve) => {
@@ -1478,10 +1575,12 @@ async function runAgentTool(name, args) {
                 ok: !error,
                 stdout: (stdout || '').slice(0, 15000),
                 stderr: (stderr || '').slice(0, 5000),
+                normalized: cmd,
               });
             });
         });
       }
+
       case 'git_summary': {
         const [b, s, l] = await Promise.all([
           runGitAsync(['rev-parse', '--abbrev-ref', 'HEAD']),
@@ -1507,9 +1606,78 @@ async function runAgentTool(name, args) {
         return { ok: r.success, output: r.output, error: r.error };
       }
       case 'git_push': {
+        if (a.confirm !== true) {
+          return { ok: false, error: 'git_push exige confirm=true e pedido explícito do usuário' };
+        }
         const r = await runGitAsync(['push']);
         return { ok: r.success, output: r.output, error: r.error };
       }
+
+      case 'portfolio_list': {
+        const keys = loadEnvKeys();
+        const apiKey = keys.OPERATOR_API_KEY || '';
+        const bases = [
+          process.env.PREMERCADO_API_URL,
+          'http://127.0.0.1:8080/api',
+          'http://127.0.0.1/api',
+        ].filter(Boolean);
+        let lastErr = 'sem API';
+        for (const base of bases) {
+          try {
+            const url = base.replace(/\/$/, '') + '/portfolio';
+            const headers = {};
+            if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+            const r = await fetch(url, { headers, signal: AbortSignal.timeout(12000) });
+            const text = await r.text();
+            if (!r.ok) {
+              lastErr = `HTTP ${r.status} ${text.slice(0, 200)}`;
+              continue;
+            }
+            let data;
+            try { data = JSON.parse(text); } catch {
+              lastErr = 'JSON inválido';
+              continue;
+            }
+            const rows = Array.isArray(data) ? data : (data.positions || data.data || []);
+            return {
+              ok: true,
+              source: url,
+              count: rows.length,
+              positions: rows.slice(0, 100),
+              note: 'Fonte da verdade da carteira do agente em produção.',
+            };
+          } catch (e) {
+            lastErr = e.message;
+          }
+        }
+        // fallback: tickers do env/config
+        const envT = keys.AGENT_PORTFOLIO_TICKERS || '';
+        return {
+          ok: false,
+          error: 'API portfolio indisponível: ' + lastErr,
+          fallback_tickers: envT ? envT.split(',').map((t) => t.trim()).filter(Boolean) : null,
+          hint: 'Suba o api-server ou edite posições na tela Portfolio do app.',
+        };
+      }
+
+      case 'app_status': {
+        const r = await new Promise((resolve) => {
+          exec('docker compose ps', {
+            cwd: WORKSPACE,
+            timeout: 20000,
+            maxBuffer: 1024 * 1024,
+            shell: '/bin/bash',
+          }, (error, stdout, stderr) => {
+            resolve({
+              ok: !error,
+              stdout: (stdout || '').slice(0, 8000),
+              stderr: (stderr || '').slice(0, 2000),
+            });
+          });
+        });
+        return r;
+      }
+
       default:
         return { ok: false, error: 'unknown tool ' + name };
     }
@@ -1543,6 +1711,7 @@ app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
       return res.status(400).json({ success: false, error: 'messages obrigatório' });
     }
 
+    // Default estável: DeepSeek Flash; Pro se pedido
     let key = modelKey && AI_MODELS[modelKey] ? modelKey : 'deepseek-flash';
     const keys = loadEnvKeys();
     if (!keys.GROQ_API_KEY && String(key).startsWith('groq')) key = 'deepseek-flash';
@@ -1561,14 +1730,16 @@ app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
 
     const llmMessages = [
       { role: 'system', content: systemContent },
-      ...messages.slice(-16).map((m) => ({ role: m.role, content: m.content })),
+      ...messages.slice(-20).map((m) => ({ role: m.role, content: m.content })),
     ];
 
     const trace = [];
     let finalContent = '';
     let usedTools = false;
+    const MAX_ROUNDS = key.includes('pro') || key.includes('quality') ? 10 : 8;
+    let autoRetryInjected = false;
 
-    for (let round = 0; round < 8; round++) {
+    for (let round = 0; round < MAX_ROUNDS; round++) {
       let data;
       try {
         data = await callLlm(cfg, apiKey, llmMessages, AGENT_TOOLS);
@@ -1588,15 +1759,31 @@ app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
           try { args = JSON.parse(fn.arguments || '{}'); } catch (_) {}
           const result = await runAgentTool(fn.name, args);
           trace.push({ tool: fn.name, args, result });
-          // Marca falhas de forma explícita no retorno da tool pro modelo
           const payload = result && result.ok === false
-            ? { ...result, _agent_note: 'FALHOU — explique o erro e sugira correção na resposta final' }
+            ? { ...result, _agent_note: 'FALHOU — explique o erro, sugira correção e tente de novo se possível' }
             : result;
           llmMessages.push({
             role: 'tool',
             tool_call_id: tc.id,
             content: JSON.stringify(payload).slice(0, 20000),
           });
+        }
+
+        // Auto-retry: se run_code/write falhou, injeta pedido de correção uma vez
+        if (!autoRetryInjected) {
+          const recentFail = trace.slice(-6).filter((t) =>
+            t.result && t.result.ok === false &&
+            (t.tool === 'run_code' || t.tool === 'write_file' || t.tool === 'shell')
+          );
+          if (recentFail.length) {
+            autoRetryInjected = true;
+            llmMessages.push({
+              role: 'user',
+              content:
+                'Alguma ferramenta falhou. Corrija a abordagem (comando/path/código) e tente de novo com tools. ' +
+                'Se for bloqueio de shell, use list_files/search_code/read_file/run_code.',
+            });
+          }
         }
         continue;
       }
