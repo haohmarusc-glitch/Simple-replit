@@ -1373,10 +1373,24 @@ const AGENT_TOOLS = [
 
 const AGENT_SYSTEM = `Você é o agente do Simple Replit na VPS.
 Responda em português. Se o usuário pedir para FAZER algo, USE as ferramentas (não só explique).
+
+Regras de execução:
 - Leia arquivos antes de editar.
 - Não exponha secrets completos na resposta final.
 - git_push/delete só se o usuário pediu explicitamente.
-- No final, resuma o que fez.`;
+
+Regras quando uma ferramenta FALHAR (ok=false ou error):
+1. NÃO diga só "Ações executadas".
+2. Reporte o erro de forma clara: ferramenta, comando/path e mensagem.
+3. Explique a causa provável (ex.: comando bloqueado pela whitelist, path fora do workspace, aspas quebradas, arquivo inexistente).
+4. Sugira a correção concreta (comando alternativo, path correto, usar list_files/read_file, ajustar código).
+5. Se puder, TENTE de novo com a abordagem corrigida na mesma conversa.
+6. No final use este formato:
+   **Feito:** …
+   **Erros:** …
+   **Sugestão:** …
+
+Shell: cwd já é o workspace — não precisa de "cd /opt/...". Evite && longos e aspas quebradas. Prefira list_files/read_file a find/grep complexos quando possível.`;
 
 function flattenTree(items, acc = []) {
   for (const it of items || []) {
@@ -1574,10 +1588,14 @@ app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
           try { args = JSON.parse(fn.arguments || '{}'); } catch (_) {}
           const result = await runAgentTool(fn.name, args);
           trace.push({ tool: fn.name, args, result });
+          // Marca falhas de forma explícita no retorno da tool pro modelo
+          const payload = result && result.ok === false
+            ? { ...result, _agent_note: 'FALHOU — explique o erro e sugira correção na resposta final' }
+            : result;
           llmMessages.push({
             role: 'tool',
             tool_call_id: tc.id,
-            content: JSON.stringify(result).slice(0, 20000),
+            content: JSON.stringify(payload).slice(0, 20000),
           });
         }
         continue;
@@ -1586,9 +1604,54 @@ app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
       break;
     }
 
-    if (!finalContent && usedTools) finalContent = 'Ações executadas.';
+    const failures = trace.filter((t) => !t.result || t.result.ok === false);
+    const weakFinal = !finalContent
+      || /^a[cç][oõ]es executadas\.?$/i.test(finalContent.trim())
+      || (failures.length && finalContent.trim().length < 80);
 
-    res.json({ success: true, content: finalContent, trace, model: key, agent: true });
+    // Se houve erro e a resposta ficou vaga, força um turno só de relatório
+    if (failures.length && weakFinal) {
+      const failLines = failures.map((t) => {
+        const err = (t.result && (t.result.error || t.result.stderr)) || 'falhou';
+        return `- ${t.tool}: ${err} | args=${JSON.stringify(t.args || {}).slice(0, 160)}`;
+      }).join('\n');
+      try {
+        const reportMsgs = [
+          ...llmMessages,
+          {
+            role: 'user',
+            content:
+              `Houve ${failures.length} ferramenta(s) com falha:\n${failLines}\n\n` +
+              'Escreva agora a resposta final em português no formato:\n' +
+              '**Feito:** o que funcionou\n**Erros:** cada falha e a causa\n**Sugestão:** como corrigir (comando/path/código alternativo)\n' +
+              'Não diga apenas "Ações executadas".',
+          },
+        ];
+        const data2 = await callLlm(cfg, apiKey, reportMsgs, null);
+        finalContent = data2.choices?.[0]?.message?.content || finalContent;
+      } catch (_) {
+        // fallback local se LLM falhar no report
+        finalContent =
+          `**Feito:** ${trace.length - failures.length} ferramenta(s) ok\n` +
+          `**Erros:**\n${failures.map((t) => `- ${t.tool}: ${(t.result && (t.result.error || t.result.stderr)) || 'falhou'}`).join('\n')}\n` +
+          `**Sugestão:** revise o comando/path; no shell o cwd já é o workspace — evite cd absoluto e aspas quebradas; use list_files/read_file quando possível.`;
+      }
+    }
+
+    if (!finalContent && usedTools) {
+      finalContent = failures.length
+        ? `**Erros:** ${failures.length} ferramenta(s) falharam. Veja o log ✖ e tente de outra forma.`
+        : 'Ações executadas com sucesso.';
+    }
+
+    res.json({
+      success: true,
+      content: finalContent,
+      trace,
+      failures: failures.length,
+      model: key,
+      agent: true,
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

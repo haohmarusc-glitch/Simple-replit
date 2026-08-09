@@ -1959,7 +1959,12 @@ function openAiPanel() {
       if (data.trace && data.trace.length) {
         data.trace.forEach((tr) => {
           const ok = tr.result && tr.result.ok !== false;
-          addPanelMsg('tool', `${ok ? '✔' : '✖'} ${tr.tool}(${JSON.stringify(tr.args || {}).slice(0, 120)})`);
+          const err = !ok && tr.result
+            ? (tr.result.error || tr.result.stderr || '')
+            : '';
+          const line = `${ok ? '✔' : '✖'} ${tr.tool}(${JSON.stringify(tr.args || {}).slice(0, 100)})`
+            + (err ? ` → ${String(err).slice(0, 180)}` : '');
+          addPanelMsg('tool', line);
         });
         loadFiles();
         if (typeof refreshGitBadge === 'function') refreshGitBadge();
