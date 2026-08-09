@@ -63,18 +63,18 @@ function setupSecurity(app) {
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-XSS-Protection', '0');
-    // Monaco (cdnjs): scripts, workers, source maps. xterm é local (self).
+    // Monaco e xterm agora são 100% locais (vendor/) — sem exceção de CDN externo na CSP.
     res.setHeader(
       'Content-Security-Policy',
       [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
-        "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
-        "font-src 'self' data: https://cdnjs.cloudflare.com",
-        "img-src 'self' data: https://cdnjs.cloudflare.com",
-        "connect-src 'self' https://cdnjs.cloudflare.com",
-        "worker-src 'self' blob: https://cdnjs.cloudflare.com",
-        "child-src 'self' blob: https://cdnjs.cloudflare.com",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "font-src 'self' data:",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "worker-src 'self' blob:",
+        "child-src 'self' blob:",
         "frame-ancestors 'self'",
         "base-uri 'self'",
         "object-src 'none'",
