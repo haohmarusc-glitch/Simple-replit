@@ -2098,7 +2098,7 @@ function applyMode(mode) {
   if (effective === 'mobile') {
     setMobileView(localStorage.getItem('sr_mobile_view') || 'files');
   } else {
-    document.body.classList.remove('view-files', 'view-code', 'view-console', 'view-ai', 'view-actions');
+    document.body.classList.remove('view-files', 'view-code', 'view-console', 'view-shell', 'view-ai', 'view-agent', 'view-actions');
   }
 
   setTimeout(() => {
@@ -2107,7 +2107,7 @@ function applyMode(mode) {
 }
 
 function setMobileView(view) {
-  const views = ['files', 'code', 'console', 'ai', 'actions'];
+  const views = ['files', 'code', 'console', 'shell', 'ai', 'agent', 'actions'];
   views.forEach(v => document.body.classList.remove('view-' + v));
   document.body.classList.add('view-' + view);
   localStorage.setItem('sr_mobile_view', view);
@@ -2117,17 +2117,22 @@ function setMobileView(view) {
   });
 
   // Sincroniza tabs internas console/shell/ai
-  if (view === 'ai') {
+  if (view === 'ai' || view === 'agent') {
     showConsoleTab('ai');
+  } else if (view === 'shell') {
+    showConsoleTab('shell');
   } else if (view === 'console') {
     showConsoleTab('console');
   } else if (view === 'actions') {
     showConsoleTab('console');
-    showActionsPanel();
+    if (typeof showActionsPanel === 'function') showActionsPanel();
   }
 
   setTimeout(() => {
     if (typeof editor !== 'undefined' && editor) editor.layout();
+    if (view === 'shell' && typeof fitAddon !== 'undefined' && fitAddon) {
+      try { fitAddon.fit(); } catch (_) {}
+    }
   }, 80);
 }
 
@@ -2208,43 +2213,44 @@ document.addEventListener('click', (e) => {
   }
 });
 
-function openSideNav() {
-  document.body.classList.add('nav-open');
-  document.getElementById('bottomNav')?.classList.add('open');
-  const bd = document.getElementById('sideNavBackdrop');
-  if (bd) bd.style.display = 'block';
-}
-
-function closeSideNav() {
-  document.body.classList.remove('nav-open');
-  document.getElementById('bottomNav')?.classList.remove('open');
-  const bd = document.getElementById('sideNavBackdrop');
-  if (bd) bd.style.display = 'none';
-}
-
-document.getElementById('btnToggleSideNav')?.addEventListener('click', (e) => {
-  e.stopPropagation();
-  openSideNav();
-});
-
-document.getElementById('sideNavBackdrop')?.addEventListener('click', closeSideNav);
-
-// Side nav mobile (lateral esquerda)
+// Bottom nav mobile (Replit-style)
 document.querySelectorAll('#bottomNav .bnav-item').forEach(btn => {
   btn.addEventListener('click', () => {
-    if (btn.dataset.action === 'close-nav') {
-      closeSideNav();
-      return;
-    }
-    if (btn.dataset.action === 'more') {
-      closeSideNav();
+    if (btn.dataset.action === 'tools' || btn.dataset.action === 'more') {
       openSheet();
       return;
     }
     closeSheet();
-    setMobileView(btn.dataset.view);
-    closeSideNav();
+    const view = btn.dataset.view;
+    if (view === 'agent') {
+      // Agent: painel grande no desktop; no mobile usa view agent + opcional panel
+      setMobileView('agent');
+      if (typeof openAiPanel === 'function' && window.innerWidth >= 768) {
+        openAiPanel();
+      }
+      return;
+    }
+    setMobileView(view);
   });
+});
+
+// Tools sheet rows
+document.getElementById('btnToolAgent')?.addEventListener('click', () => {
+  closeSheet();
+  if (typeof openAiPanel === 'function') openAiPanel();
+  else setMobileView('agent');
+});
+document.getElementById('btnToolShell')?.addEventListener('click', () => {
+  closeSheet();
+  setMobileView('shell');
+});
+document.getElementById('btnToolConsole')?.addEventListener('click', () => {
+  closeSheet();
+  setMobileView('console');
+});
+document.getElementById('btnToolFiles')?.addEventListener('click', () => {
+  closeSheet();
+  setMobileView('files');
 });
 
 // Ao abrir arquivo no mobile → Código + breadcrumb

@@ -42,43 +42,138 @@
       </div>
     </header>
 
-    <!-- Bottom sheet (mobile) + dropdown (desktop) -->
+    <!-- Tools sheet (mobile + desktop more menu) -->
     <div id="sheetBackdrop" class="sheet-backdrop" style="display:none;"></div>
-    <div id="moreMenu" class="more-menu sheet-panel" style="display:none;">
+    <div id="moreMenu" class="more-menu sheet-panel tools-panel" style="display:none;">
       <div class="sheet-handle mobile-only" aria-hidden="true"></div>
-      <div class="sheet-title mobile-only">Ações</div>
-      <div class="sheet-section">
-        <div class="sheet-section-label">AI</div>
-        <button id="btnAiPanel" class="btn btn-primary">✦ Assistente AI</button>
+      <div class="sheet-title mobile-only">Tools</div>
+
+      <div class="tools-list">
+        <button type="button" class="tool-row" id="btnToolAgent" data-tool="agent">
+          <span class="tool-icon tool-icon-agent">✦</span>
+          <span class="tool-text">
+            <span class="tool-title">Agent</span>
+            <span class="tool-desc">Chat com IA e ferramentas do workspace</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnToolShell" data-tool="shell">
+          <span class="tool-icon">🐚</span>
+          <span class="tool-text">
+            <span class="tool-title">Shell</span>
+            <span class="tool-desc">Terminal no workspace (whitelist)</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnToolConsole" data-tool="console">
+          <span class="tool-icon">💻</span>
+          <span class="tool-text">
+            <span class="tool-title">Console</span>
+            <span class="tool-desc">Saída de execução e logs</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnToolFiles" data-tool="files">
+          <span class="tool-icon">📁</span>
+          <span class="tool-text">
+            <span class="tool-title">Files</span>
+            <span class="tool-desc">Árvore de arquivos do projeto</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnGitPanel">
+          <span class="tool-icon">⎇</span>
+          <span class="tool-text">
+            <span class="tool-title">Git</span>
+            <span class="tool-desc">Status, diff, commit, pull e push</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnGitDiff">
+          <span class="tool-icon">📝</span>
+          <span class="tool-text">
+            <span class="tool-title">Git Diff</span>
+            <span class="tool-desc">Diff visual Monaco</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row btn-deploy-row" id="btnDeploySheet">
+          <span class="tool-icon">🚀</span>
+          <span class="tool-text">
+            <span class="tool-title">Deploy</span>
+            <span class="tool-desc">Pull + build docker com log ao vivo</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnBackup">
+          <span class="tool-icon">💾</span>
+          <span class="tool-text">
+            <span class="tool-title">Backup</span>
+            <span class="tool-desc">Salvar snapshot tar.gz do workspace</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnRestore">
+          <span class="tool-icon">♻</span>
+          <span class="tool-text">
+            <span class="tool-title">Restore</span>
+            <span class="tool-desc">Restaurar backup anterior</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnRestartApp">
+          <span class="tool-icon">↻</span>
+          <span class="tool-text">
+            <span class="tool-title">Restart App</span>
+            <span class="tool-desc">docker compose restart app</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnMonitor">
+          <span class="tool-icon">📊</span>
+          <span class="tool-text">
+            <span class="tool-title">Monitor</span>
+            <span class="tool-desc">Status do app e containers</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnLogs">
+          <span class="tool-icon">📋</span>
+          <span class="tool-text">
+            <span class="tool-title">Workflow Logs</span>
+            <span class="tool-desc">Logs do deploy em stream</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnLogsAll">
+          <span class="tool-icon">📦</span>
+          <span class="tool-text">
+            <span class="tool-title">All Logs</span>
+            <span class="tool-desc">Logs gerais do ambiente</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnStopLogs" style="display:none;">
+          <span class="tool-icon">⏹</span>
+          <span class="tool-text">
+            <span class="tool-title">Parar Logs</span>
+            <span class="tool-desc">Encerra streams ativos</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnApiKeys">
+          <span class="tool-icon">🔑</span>
+          <span class="tool-text">
+            <span class="tool-title">Secrets / API Keys</span>
+            <span class="tool-desc">Editar .env (chaves de provedores)</span>
+          </span>
+        </button>
+        <button type="button" class="tool-row" id="btnSecrets">
+          <span class="tool-icon">🔒</span>
+          <span class="tool-text">
+            <span class="tool-title">List Secrets</span>
+            <span class="tool-desc">Ver quais keys estão setadas</span>
+          </span>
+        </button>
       </div>
-      <div class="sheet-section">
-        <div class="sheet-section-label">Git</div>
-        <button id="btnGitPanel" class="btn btn-primary">⎇ Painel Git</button>
-        <button id="btnGitDiff" class="btn">Git Diff</button>
-        <button id="btnGitStatus" class="btn">Git Status</button>
-        <button id="btnGitPull" class="btn">Git Pull</button>
-        <button id="btnGitCommit" class="btn">Git Commit</button>
-        <button id="btnGitPush" class="btn">Git Push</button>
+
+      <!-- hidden legacy git buttons for existing handlers -->
+      <div style="display:none;">
+        <button id="btnAiPanel" type="button">AI</button>
+        <button id="btnGitStatus" type="button">Git Status</button>
+        <button id="btnGitPull" type="button">Git Pull</button>
+        <button id="btnGitCommit" type="button">Git Commit</button>
+        <button id="btnGitPush" type="button">Git Push</button>
       </div>
-      <div class="sheet-section">
-        <div class="sheet-section-label">Deploy &amp; App</div>
-        <button id="btnDeploySheet" class="btn btn-deploy">🚀 Deploy</button>
-        <button id="btnBackup" class="btn">💾 Salvar Backup</button>
-        <button id="btnRestore" class="btn">♻ Restaurar Backup</button>
-        <button id="btnRestartApp" class="btn">↻ Restart App</button>
-        <button id="btnMonitor" class="btn">📊 Monitor</button>
-      </div>
-      <div class="sheet-section">
-        <div class="sheet-section-label">Logs</div>
-        <button id="btnLogs" class="btn btn-logs">📋 Workflow Logs</button>
-        <button id="btnLogsAll" class="btn btn-logs">📦 All Logs</button>
-        <button id="btnStopLogs" class="btn btn-stop" style="display:none;">⏹ Parar Logs</button>
-      </div>
-      <div class="sheet-section">
-        <div class="sheet-section-label">Config</div>
-        <button id="btnApiKeys" class="btn btn-keys">🔑 API Keys</button>
-        <button id="btnSecrets" class="btn btn-keys">🔒 Secrets</button>
-        <div class="sheet-mode-row mobile-only">
+
+      <div class="sheet-section sheet-mode-section mobile-only">
+        <div class="sheet-mode-row">
           <label for="modeSelectMobile">Interface</label>
           <select id="modeSelectMobile">
             <option value="auto">Auto</option>
@@ -144,34 +239,29 @@
       </div>
     </div>
 
-    <button type="button" id="btnToggleSideNav" class="side-nav-toggle mobile-only" title="Menu" aria-label="Abrir menu">⋯</button>
-    <nav id="bottomNav" class="side-nav mobile-only" aria-label="Navegação mobile">
-      <button type="button" class="bnav-item" data-action="close-nav" title="Fechar">
-        <span class="bnav-icon">⋯</span>
-        <span class="bnav-label">Fechar</span>
-      </button>
+    <!-- Bottom tab bar (Replit-style mobile) -->
+    <nav id="bottomNav" class="bottom-nav mobile-only" aria-label="Navegação mobile">
       <button type="button" class="bnav-item active" data-view="files" title="Arquivos">
         <span class="bnav-icon">📁</span>
-        <span class="bnav-label">Arquivos</span>
+        <span class="bnav-label">Files</span>
       </button>
       <button type="button" class="bnav-item" data-view="code" title="Código">
         <span class="bnav-icon">✏️</span>
-        <span class="bnav-label">Código</span>
+        <span class="bnav-label">Code</span>
       </button>
-      <button type="button" class="bnav-item" data-view="console" title="Console">
-        <span class="bnav-icon">💻</span>
-        <span class="bnav-label">Console</span>
+      <button type="button" class="bnav-item" data-view="shell" title="Shell">
+        <span class="bnav-icon">🐚</span>
+        <span class="bnav-label">Shell</span>
       </button>
-      <button type="button" class="bnav-item" data-view="ai" title="AI">
-        <span class="bnav-icon">🤖</span>
-        <span class="bnav-label">AI</span>
+      <button type="button" class="bnav-item bnav-agent" data-view="agent" title="Agent">
+        <span class="bnav-icon">✦</span>
+        <span class="bnav-label">Agent</span>
       </button>
-      <button type="button" class="bnav-item" data-action="more" title="Mais">
-        <span class="bnav-icon">⚡</span>
-        <span class="bnav-label">Mais</span>
+      <button type="button" class="bnav-item" data-action="tools" title="Tools">
+        <span class="bnav-icon">🔧</span>
+        <span class="bnav-label">Tools</span>
       </button>
     </nav>
-    <div id="sideNavBackdrop" class="side-nav-backdrop mobile-only" style="display:none;"></div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
