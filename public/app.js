@@ -17,6 +17,27 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// ========== TIMESTAMPS (logs do console/agente precisam de data e hora) ==========
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+/** HH:MM:SS local — usado em logs tipo terminal (console, shell). */
+function clockStamp(d = new Date()) {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+/** HH:MM se for hoje, senão DD/MM HH:MM — usado em bolhas de chat. */
+function chatStamp(d = new Date()) {
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  const time = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return sameDay ? time : `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)} ${time}`;
+}
+
+/** DD/MM/AAAA HH:MM:SS — para title="" (tooltip com data completa). */
+function fullStamp(d = new Date()) {
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${clockStamp(d)}`;
+}
+
 // ========== TOAST ==========
 function toast(msg, type = 'info') {
   let wrap = document.getElementById('toastWrap');
@@ -726,7 +747,11 @@ function appendConsole(type, text) {
   const el = document.getElementById('consoleOutput');
   const span = document.createElement('span');
   span.className = type;
-  span.textContent = text + (text.endsWith('\n') ? '' : '\n');
+  const stamp = `[${clockStamp()}] `;
+  const body = text.endsWith('\n') ? text.slice(0, -1) : text;
+  // Timestamp só na 1ª linha do bloco (evita repetir em saída multi-linha de comando/deploy).
+  span.textContent = stamp + body.split('\n').join('\n' + ' '.repeat(stamp.length)) + '\n';
+  span.title = fullStamp();
   el.appendChild(span);
   el.scrollTop = el.scrollHeight;
 }
@@ -1840,6 +1865,11 @@ function addAiMessage(role, content, files) {
   const div = document.createElement('div');
   div.className = `ai-msg ${role}`;
   div.textContent = content;
+  const time = document.createElement('span');
+  time.className = 'ai-msg-time';
+  time.textContent = chatStamp();
+  time.title = fullStamp();
+  div.appendChild(time);
   if (files && files.length) {
     const actions = document.createElement('div');
     actions.className = 'file-actions';
@@ -1960,19 +1990,24 @@ function openAiPanel() {
   overlay.innerHTML = `
     <div class="ai-workspace">
       <div class="ai-ws-header">
-        <h3>✦ Assistente AI · agente com acesso ao workspace</h3>
-        <div class="ai-ws-actions">
-          <label class="ai-agent-toggle"><input type="checkbox" id="aiAgentMode" checked /> Agente (fazer ações)</label>
-          <select id="aiPanelModel">
-            <option value="deepseek-flash">DeepSeek Flash</option>
-            <option value="deepseek-pro">DeepSeek Pro</option>
-            <option value="groq-fast">Groq Fast</option>
-            <option value="groq-quality">Groq Quality</option>
-          </select>
-          <button type="button" class="btn" id="aiPanelUsage">💰 Custos</button>
-          <button type="button" class="btn" id="aiPanelClear">Limpar</button>
-          <button type="button" class="btn" id="aiPanelClose">Fechar</button>
+        <button type="button" class="ai-ws-back" id="aiPanelClose" title="Fechar">←</button>
+        <div class="ai-ws-title">
+          <span class="ai-ws-title-icon">✦</span>
+          <span class="ai-ws-title-text">Agente</span>
         </div>
+        <div class="ai-ws-actions">
+          <button type="button" class="ai-ws-icon-btn" id="aiPanelUsage" title="Custos de API">💰</button>
+          <button type="button" class="ai-ws-icon-btn" id="aiPanelClear" title="Limpar histórico">🗑</button>
+        </div>
+      </div>
+      <div class="ai-ws-subbar">
+        <label class="ai-agent-toggle"><input type="checkbox" id="aiAgentMode" checked /> Agente (fazer ações)</label>
+        <select id="aiPanelModel">
+          <option value="deepseek-flash">DeepSeek Flash</option>
+          <option value="deepseek-pro">DeepSeek Pro</option>
+          <option value="groq-fast">Groq Fast</option>
+          <option value="groq-quality">Groq Quality</option>
+        </select>
       </div>
       <div class="ai-ws-body">
         <div class="ai-ws-messages" id="aiPanelMessages"></div>
@@ -1985,7 +2020,7 @@ function openAiPanel() {
           </div>
           <div class="ai-ws-input-row">
             <textarea id="aiPanelInput" placeholder="Peça para criar, editar, rodar, commit… (modo agente faz de verdade)"></textarea>
-            <button type="button" class="btn btn-primary" id="aiPanelSend">Enviar</button>
+            <button type="button" class="ai-ws-send" id="aiPanelSend" title="Enviar">➤</button>
           </div>
         </div>
       </div>
@@ -2031,32 +2066,84 @@ function openAiPanel() {
     }
   };
   const msgBox = document.getElementById('aiPanelMessages');
-  function addPanelMsg(role, content) {
+
+  /** Bolha de mensagem (usuário/assistente) com timestamp — cada log do agente tem data/hora. */
+  function addPanelMsg(role, content, ts) {
+    const d = ts ? new Date(ts) : new Date();
     const div = document.createElement('div');
     div.className = 'ai-ws-msg ' + role;
-    div.textContent = content;
+    const text = document.createElement('div');
+    text.className = 'ai-ws-msg-text';
+    text.textContent = content;
+    div.appendChild(text);
+    const time = document.createElement('span');
+    time.className = 'ai-ws-msg-time';
+    time.textContent = chatStamp(d);
+    time.title = fullStamp(d);
+    div.appendChild(time);
     msgBox.appendChild(div);
     msgBox.scrollTop = msgBox.scrollHeight;
+    return div;
   }
-  agentMessages.forEach((m) => addPanelMsg(m.role === 'user' ? 'user' : 'assistant', m.content));
+
+  /**
+   * Bloco colapsável "⚙ Trabalhou por Ns" com a lista de ferramentas usadas nessa
+   * rodada — cada chamada mostra hora exata (estilo "Worked for Ns" do Replit).
+   */
+  function addPanelTrace(trace, elapsedSec) {
+    const okCount = trace.filter((tr) => tr.result && tr.result.ok !== false).length;
+    const failCount = trace.length - okCount;
+    const now = new Date();
+    const details = document.createElement('details');
+    details.className = 'ai-ws-trace';
+    const summary = document.createElement('summary');
+    summary.innerHTML =
+      `<span class="trace-icon">⚙</span>` +
+      `<span class="trace-label">Trabalhou por ${elapsedSec}s · ${trace.length} ação(ões)` +
+      (failCount ? ` · ${failCount} falha(s)` : '') + `</span>` +
+      `<span class="trace-time" title="${escapeHtml(fullStamp(now))}">${escapeHtml(chatStamp(now))}</span>`;
+    details.appendChild(summary);
+    const body = document.createElement('div');
+    body.className = 'ai-ws-trace-body';
+    trace.forEach((tr) => {
+      const ok = tr.result && tr.result.ok !== false;
+      const err = !ok && tr.result ? (tr.result.error || tr.result.stderr || '') : '';
+      const argsPreview = JSON.stringify(tr.args || {}).slice(0, 120);
+      const step = document.createElement('div');
+      step.className = 'trace-step ' + (ok ? 'ok' : 'err');
+      step.innerHTML =
+        `<span class="trace-step-icon">${ok ? '✔' : '✖'}</span>` +
+        `<span class="trace-step-time" title="${escapeHtml(fullStamp(now))}">${escapeHtml(clockStamp(now))}</span>` +
+        `<span class="trace-step-name">${escapeHtml(tr.tool)}</span>` +
+        `<span class="trace-step-args">${escapeHtml(argsPreview)}</span>` +
+        (err ? `<span class="trace-step-err">${escapeHtml(String(err).slice(0, 220))}</span>` : '');
+      body.appendChild(step);
+    });
+    details.appendChild(body);
+    msgBox.appendChild(details);
+    msgBox.scrollTop = msgBox.scrollHeight;
+  }
+
+  agentMessages.forEach((m) => addPanelMsg(m.role === 'user' ? 'user' : 'assistant', m.content, m.ts));
 
   async function sendAgent(text) {
     const input = document.getElementById('aiPanelInput');
     const t = (text || (input && input.value) || '').trim();
     if (!t) return;
     if (input) input.value = '';
-    agentMessages.push({ role: 'user', content: t });
+    agentMessages.push({ role: 'user', content: t, ts: Date.now() });
     persistAgentMessages();
     addPanelMsg('user', t);
     const agentOn = document.getElementById('aiAgentMode')?.checked !== false;
     const model = document.getElementById('aiPanelModel')?.value || 'deepseek-flash';
     const thinking = document.createElement('div');
-    thinking.className = 'ai-ws-msg assistant';
+    thinking.className = 'ai-ws-msg assistant ai-ws-thinking';
     thinking.id = 'aiPanelThinking';
     thinking.textContent = agentOn ? 'Agente trabalhando (arquivos/git/shell)…' : 'Pensando…';
     msgBox.appendChild(thinking);
     msgBox.scrollTop = msgBox.scrollHeight;
     const endpoint = agentOn ? '/api/ai/agent' : '/api/ai/chat';
+    const startedAt = Date.now();
     try {
       const res = await apiFetch(endpoint, {
         method: 'POST',
@@ -2074,23 +2161,17 @@ function openAiPanel() {
         addPanelMsg('assistant', 'Erro: ' + (data.error || 'falha'));
         return;
       }
+      const elapsedSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
       if (data.trace && data.trace.length) {
-        data.trace.forEach((tr) => {
-          const ok = tr.result && tr.result.ok !== false;
-          const err = !ok && tr.result
-            ? (tr.result.error || tr.result.stderr || '')
-            : '';
-          const line = `${ok ? '✔' : '✖'} ${tr.tool}(${JSON.stringify(tr.args || {}).slice(0, 100)})`
-            + (err ? ` → ${String(err).slice(0, 180)}` : '');
-          addPanelMsg('tool', line);
-        });
+        addPanelTrace(data.trace, elapsedSec);
         loadFiles();
         if (typeof refreshGitBadge === 'function') refreshGitBadge();
       }
       const content = data.content || '(sem texto)';
-      agentMessages.push({ role: 'assistant', content });
+      const assistantTs = Date.now();
+      agentMessages.push({ role: 'assistant', content, ts: assistantTs });
       persistAgentMessages();
-      addPanelMsg('assistant', content);
+      addPanelMsg('assistant', content, assistantTs);
       if (data.cost && (data.cost.total_tokens || data.cost.cost_usd)) {
         const c = data.cost;
         addPanelMsg('tool',
