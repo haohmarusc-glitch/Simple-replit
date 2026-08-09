@@ -4,3 +4,6 @@ backups/
 *.log
 .env
 .DS_Store
+
+# AI usage store
+/data/

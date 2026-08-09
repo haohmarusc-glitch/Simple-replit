@@ -4,6 +4,7 @@ const { exec, spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 const { WORKSPACE, AUTH_TOKEN, SHELL_OPEN, BACKUP_DIR, PORT } = require('../config');
 const { getSafePath, listFiles, runGit, runGitAsync, loadEnvKeys } = require('../helpers');
+const { recordUsage, getSummary, resetUsage } = require('../ai-usage');
 const { rateLimit } = require('../middleware');
 
 module.exports = function registerRoutes(app) {
@@ -1344,16 +1345,33 @@ app.post('/api/ai/chat', async (req, res) => {
       files.push({ path: match[1].trim(), content: match[2].replace(/\n$/, '') });
     }
 
+    const costInfo = recordUsage({
+      modelKey: key,
+      providerModel: cfg.model,
+      usage: data.usage,
+      endpoint: 'chat',
+    });
+
     res.json({
       success: true,
       content,
       files,
       model: key,
-      usage: data.usage || null
+      usage: data.usage || null,
+      cost: costInfo,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+app.get('/api/ai/usage', (req, res) => {
+  const days = Math.min(30, Math.max(1, parseInt(req.query.days || '7', 10) || 7));
+  res.json(getSummary(days));
+});
+
+app.post('/api/ai/usage/reset', rateLimit(3, 60_000), (req, res) => {
+  res.json(resetUsage());
 });
 
 // ========== AI AGENT (ferramentas = poder do app) ==========
@@ -1738,6 +1756,30 @@ app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
     let usedTools = false;
     const MAX_ROUNDS = key.includes('pro') || key.includes('quality') ? 10 : 8;
     let autoRetryInjected = false;
+    let sessionCost = {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      cost_usd: 0,
+      calls: 0,
+    };
+
+    function trackLlmUsage(data) {
+      const info = recordUsage({
+        modelKey: key,
+        providerModel: cfg.model,
+        usage: data && data.usage,
+        endpoint: 'agent',
+      });
+      if (info) {
+        sessionCost.prompt_tokens += info.prompt_tokens;
+        sessionCost.completion_tokens += info.completion_tokens;
+        sessionCost.total_tokens += info.total_tokens;
+        sessionCost.cost_usd = Math.round((sessionCost.cost_usd + info.cost_usd) * 1e6) / 1e6;
+        sessionCost.calls += 1;
+        sessionCost.day_total_usd = info.day_total_usd;
+      }
+    }
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
       let data;
@@ -1747,6 +1789,7 @@ app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
         if (round === 0) data = await callLlm(cfg, apiKey, llmMessages, null);
         else throw e;
       }
+      trackLlmUsage(data);
 
       const msg = data.choices?.[0]?.message || {};
       const toolCalls = msg.tool_calls;
@@ -1815,6 +1858,7 @@ app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
           },
         ];
         const data2 = await callLlm(cfg, apiKey, reportMsgs, null);
+        trackLlmUsage(data2);
         finalContent = data2.choices?.[0]?.message?.content || finalContent;
       } catch (_) {
         // fallback local se LLM falhar no report
@@ -1838,6 +1882,7 @@ app.post('/api/ai/agent', rateLimit(10, 60_000), async (req, res) => {
       failures: failures.length,
       model: key,
       agent: true,
+      cost: sessionCost,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

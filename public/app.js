@@ -1900,6 +1900,7 @@ function openAiPanel() {
             <option value="groq-fast">Groq Fast</option>
             <option value="groq-quality">Groq Quality</option>
           </select>
+          <button type="button" class="btn" id="aiPanelUsage">💰 Custos</button>
           <button type="button" class="btn" id="aiPanelClear">Limpar</button>
           <button type="button" class="btn" id="aiPanelClose">Fechar</button>
         </div>
@@ -1927,6 +1928,38 @@ function openAiPanel() {
     agentMessages.length = 0;
     persistAgentMessages();
     document.getElementById('aiPanelMessages').innerHTML = '';
+  };
+  document.getElementById('aiPanelUsage').onclick = async () => {
+    try {
+      const res = await apiFetch('/api/ai/usage?days=7');
+      const data = await res.json();
+      if (!data.success) {
+        addPanelMsg('assistant', 'Erro ao ler custos: ' + (data.error || ''));
+        return;
+      }
+      const t = data.today || {};
+      const p = data.period || {};
+      const lines = [
+        '── Custos API (estimativa) ──',
+        `Hoje: ${t.calls || 0} chamadas · ${t.total_tokens || 0} tokens · ~$${(t.cost_usd || 0).toFixed(4)}`,
+        `7 dias: ${p.calls || 0} chamadas · ${p.total_tokens || 0} tokens · ~$${(p.cost_usd || 0).toFixed(4)}`,
+      ];
+      if (t.by_model) {
+        Object.entries(t.by_model).forEach(([m, v]) => {
+          lines.push(`  ${m}: ${v.calls}× · ${v.total_tokens} tok · ~$${(v.cost_usd || 0).toFixed(5)}`);
+        });
+      }
+      if (data.recent && data.recent.length) {
+        lines.push('Últimas:');
+        data.recent.slice(0, 5).forEach((r) => {
+          lines.push(`  ${r.at.slice(11, 19)} ${r.endpoint} ${r.modelKey} ${r.total_tokens} tok ~$${Number(r.cost_usd).toFixed(5)}`);
+        });
+      }
+      lines.push('Valores aproximados (tabela pública do provedor).');
+      addPanelMsg('assistant', lines.join('\n'));
+    } catch (err) {
+      addPanelMsg('assistant', 'Erro custos: ' + err.message);
+    }
   };
   const msgBox = document.getElementById('aiPanelMessages');
   function addPanelMsg(role, content) {
@@ -1989,6 +2022,13 @@ function openAiPanel() {
       agentMessages.push({ role: 'assistant', content });
       persistAgentMessages();
       addPanelMsg('assistant', content);
+      if (data.cost && (data.cost.total_tokens || data.cost.cost_usd)) {
+        const c = data.cost;
+        addPanelMsg('tool',
+          `💰 esta chamada: ${c.total_tokens || 0} tokens · ~$${(c.cost_usd || 0).toFixed(5)}` +
+          (c.day_total_usd != null ? ` · hoje ~$${Number(c.day_total_usd).toFixed(4)}` : '')
+        );
+      }
       if (data.files && data.files.length) {
         for (const f of data.files) {
           try {
