@@ -163,7 +163,7 @@ function startClean() {
 }
 
 require.config({
-  paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }
+  paths: { vs: 'vendor/monaco/vs' }
 });
 
 require(['vs/editor/editor.main'], function () {
