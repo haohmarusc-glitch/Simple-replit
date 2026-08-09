@@ -504,24 +504,35 @@ body {
 }
 
 .xterm-container {
-  flex: 1;
-  min-height: 0;
-  padding: 6px 8px 4px;
+  flex: 1 1 auto;
+  min-height: 160px;
+  height: 100%;
+  padding: 8px 10px 6px;
   background: #111;
   overflow: hidden;
+  cursor: text;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .xterm-container .xterm {
   height: 100%;
+  width: 100%;
 }
 
 .xterm-container .xterm-viewport {
   overflow-y: auto !important;
 }
 
+.xterm-container .xterm-screen {
+  min-height: 120px;
+}
+
 /* console panel taller when shell is active */
 .console-panel.shell-active {
-  height: 280px;
+  height: 320px;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
 }
 
 .ai-model-select select {

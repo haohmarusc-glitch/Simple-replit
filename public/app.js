@@ -1233,11 +1233,59 @@ function writePrompt() {
   term.write('\x1b[32m$\x1b[0m ');
 }
 
+function writeShellBanner() {
+  if (!term) return;
+  term.writeln('\x1b[1;32mSimple Replit Shell\x1b[0m');
+  term.writeln('\x1b[90mToque aqui e digite · Enter = executar · ↑/↓ = histórico · Ctrl+L = limpar\x1b[0m');
+  term.writeln('');
+  writePrompt();
+}
+
+/** Ajusta tamanho do xterm depois que o painel já tem altura real (mobile/desktop). */
+function fitAndFocusTerminal(opts = {}) {
+  if (!term) return;
+  const redraw = !!opts.redraw;
+  try {
+    if (fitAddon) fitAddon.fit();
+  } catch (_) {}
+  // Se ainda estiver 0x0 (painel acabou de aparecer), força tamanho mínimo
+  try {
+    const rows = term.rows || 0;
+    const cols = term.cols || 0;
+    if (rows < 3 || cols < 10) {
+      const h = Math.max(xtermContainer?.clientHeight || 0, 240);
+      const w = Math.max(xtermContainer?.clientWidth || 0, 320);
+      const forcedRows = Math.max(8, Math.floor(h / 18));
+      const forcedCols = Math.max(40, Math.floor(w / 8));
+      term.resize(forcedCols, forcedRows);
+    }
+  } catch (_) {}
+  if (redraw) {
+    try {
+      term.reset();
+      currentLine = '';
+      writeShellBanner();
+    } catch (_) {}
+  }
+  try { term.focus(); } catch (_) {}
+  try { term.scrollToBottom(); } catch (_) {}
+}
+
 function initTerminal() {
-  if (term || typeof Terminal === 'undefined') return;
+  if (term) return;
+
+  if (typeof Terminal === 'undefined') {
+    if (xtermContainer) {
+      xtermContainer.innerHTML =
+        '<div style="color:#f85149;padding:12px;font:13px monospace">' +
+        'Shell indisponível: xterm.js não carregou. Atualize a página (F5).</div>';
+    }
+    return;
+  }
+
   term = new Terminal({
     cursorBlink: true,
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace",
     theme: {
       background: '#111111',
@@ -1255,18 +1303,26 @@ function initTerminal() {
     },
     convertEol: true,
     scrollback: 2000,
+    allowProposedApi: true,
   });
-  if (typeof FitAddon !== 'undefined') {
+
+  if (typeof FitAddon !== 'undefined' && FitAddon.FitAddon) {
     fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
   }
-  term.open(xtermContainer);
-  if (fitAddon) fitAddon.fit();
 
-  term.writeln('\x1b[1;32mSimple Replit Shell\x1b[0m');
-  term.writeln('\x1b[90mEnter = executar · ↑/↓ = histórico · Ctrl+L = limpar\x1b[0m');
-  term.writeln('');
-  writePrompt();
+  // Container precisa estar visível antes do open/fit
+  xtermContainer.style.display = 'block';
+  term.open(xtermContainer);
+  writeShellBanner();
+
+  // Clique/toque no painel foca o terminal (mobile)
+  xtermContainer.addEventListener('click', () => {
+    try { term.focus(); } catch (_) {}
+  });
+  xtermContainer.addEventListener('touchstart', () => {
+    try { term.focus(); } catch (_) {}
+  }, { passive: true });
 
   term.onData((data) => {
     if (shellBusy) return;
@@ -1338,8 +1394,8 @@ function initTerminal() {
   });
 
   window.addEventListener('resize', () => {
-    if (fitAddon && xtermContainer && xtermContainer.style.display !== 'none') {
-      try { fitAddon.fit(); } catch (_) {}
+    if (xtermContainer && xtermContainer.style.display !== 'none') {
+      fitAndFocusTerminal();
     }
   });
 }
@@ -1393,10 +1449,12 @@ function showConsoleTab(name) {
 
   if (isShell) {
     initTerminal();
-    setTimeout(() => {
-      if (fitAddon) try { fitAddon.fit(); } catch (_) {}
-      if (term) term.focus();
-    }, 50);
+    // Mobile: painel ganha altura só após o CSS da view — fit em cascata
+    requestAnimationFrame(() => {
+      fitAndFocusTerminal({ redraw: !term || term.rows < 3 });
+      setTimeout(() => fitAndFocusTerminal(), 80);
+      setTimeout(() => fitAndFocusTerminal(), 250);
+    });
   }
   if (isAi) document.getElementById('aiInput')?.focus();
 }
@@ -2147,7 +2205,10 @@ function setMobileView(view) {
       if (typeof editor !== 'undefined' && editor) {
         try { editor.layout(); } catch (_) {}
       }
-      if ((view === 'shell' || view === 'console') && typeof fitAddon !== 'undefined' && fitAddon) {
+      if (view === 'shell' && typeof fitAndFocusTerminal === 'function') {
+        fitAndFocusTerminal();
+        setTimeout(() => fitAndFocusTerminal(), 150);
+      } else if ((view === 'shell' || view === 'console') && typeof fitAddon !== 'undefined' && fitAddon) {
         try { fitAddon.fit(); } catch (_) {}
       }
       if (view === 'shell' && typeof term !== 'undefined' && term) {
