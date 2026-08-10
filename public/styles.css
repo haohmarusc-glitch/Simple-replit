@@ -471,7 +471,11 @@ body {
 }
 
 .console-output .stderr {
+  display: block;
   color: var(--error);
+  border-left: 3px solid var(--error);
+  background: rgba(239, 68, 68, 0.08);
+  padding: 1px 8px;
 }
 
 .console-output .info {
@@ -481,6 +485,17 @@ body {
 .console-tabs {
   display: flex;
   gap: 4px;
+}
+
+.console-source-filter {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 110px;
 }
 
 .console-tabs .tab {
@@ -983,6 +998,18 @@ body.mode-mobile .top-actions select {
   font-size: 15px;
 }
 
+/* Compacto: cabe ao lado de Python/Rodar/Salvar sem estourar telas estreitas
+   (o texto completo ainda aparece na lista ao abrir o select). */
+body.mode-mobile .top-actions .mode-select-compact {
+  width: 42px;
+  min-width: 0;
+  padding: 8px 2px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
 body.mode-mobile .file-breadcrumb {
   font-size: 11px;
 }
@@ -1148,6 +1175,23 @@ body.mode-mobile.view-shell .console-panel.shell-active,
 body.mode-mobile.view-ai .console-panel.shell-active,
 body.mode-mobile.view-agent .console-panel.shell-active {
   height: 100% !important;
+}
+
+/* Header do console tem tabs + filtro + copiar + limpar: no mobile isso não
+   cabe numa linha só, então vira uma trilha com scroll horizontal em vez de
+   quebrar ou sobrepor os controles. */
+body.mode-mobile .console-header {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.mode-mobile .console-header > * {
+  flex-shrink: 0;
+}
+
+body.mode-mobile .console-source-filter {
+  max-width: 88px;
 }
 
 body.mode-mobile.view-console .console-output,
