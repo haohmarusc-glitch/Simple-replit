@@ -2455,11 +2455,9 @@ document.querySelectorAll('#bottomNav .bnav-item').forEach(btn => {
     closeSheet();
     const view = btn.dataset.view;
     if (view === 'agent') {
-      // Agent: painel grande no desktop; no mobile usa view agent + opcional panel
+      // Agent: sempre abre o painel completo (com ferramentas) — igual em mobile e desktop.
       setMobileView('agent');
-      if (typeof openAiPanel === 'function' && window.innerWidth >= 768) {
-        openAiPanel();
-      }
+      if (typeof openAiPanel === 'function') openAiPanel();
       return;
     }
     setMobileView(view);
