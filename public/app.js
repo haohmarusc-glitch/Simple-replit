@@ -148,17 +148,38 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// ========== DEEP LINK (?open=monitor|logs|status) ==========
+// Permite outro painel (ex.: o Command Center do Premercado) linkar direto
+// pra uma ferramenta específica em vez de só abrir o editor na raiz.
+const DEEP_LINK_BUTTON = { monitor: 'btnMonitor', status: 'btnMonitor', logs: 'btnLogsAll' };
+function runDeepLink() {
+  const open = new URLSearchParams(location.search).get('open');
+  const btnId = DEEP_LINK_BUTTON[open];
+  if (!btnId) return;
+  if (document.body.classList.contains('mode-mobile') && typeof setMobileView === 'function') {
+    setMobileView('console');
+  } else if (typeof showConsoleTab === 'function') {
+    showConsoleTab('console');
+  }
+  setTimeout(() => document.getElementById(btnId)?.click(), 50);
+}
+
 // Verifica se auth é necessária
 fetch('/api/auth/status')
   .then((r) => r.json())
   .then((s) => {
-    if (s.authRequired && !getAuthToken()) showLoginGate();
-    else if (s.authRequired && getAuthToken()) {
+    if (s.authRequired && !getAuthToken()) {
+      showLoginGate();
+      window.addEventListener('sr-auth', runDeepLink, { once: true });
+    } else if (s.authRequired && getAuthToken()) {
       // valida token
       apiFetch('/api/info').catch(() => {});
+      runDeepLink();
+    } else {
+      runDeepLink();
     }
   })
-  .catch(() => {});
+  .catch(() => { runDeepLink(); });
 
 // ========== MONACO SETUP ==========
 const WELCOME_CODE =
@@ -747,39 +768,66 @@ async function runCode() {
 // Rastreia qual função disparou a última leva de appendConsole (Rodar, Git, Deploy...)
 // pra permitir filtrar/copiar o log por origem sem precisar marcar toda chamada manualmente.
 let consoleActiveSource = 'run';
+const CONSOLE_MAX_LINES = 150; // mantém só as últimas 150 linhas na tela (evita dump gigante travando o scroll)
 
 function appendConsole(type, text, source) {
   const el = document.getElementById('consoleOutput');
-  const span = document.createElement('span');
   const src = source || consoleActiveSource;
-  span.className = type;
-  span.dataset.source = src;
+  const line = document.createElement('div');
+  line.className = 'console-line ' + type;
+  line.dataset.source = src;
+
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'console-line-check';
+
+  const textEl = document.createElement('span');
+  textEl.className = 'console-line-text';
   const stamp = `[${clockStamp()}] `;
   const body = text.endsWith('\n') ? text.slice(0, -1) : text;
   // Timestamp só na 1ª linha do bloco (evita repetir em saída multi-linha de comando/deploy).
-  span.textContent = stamp + body.split('\n').join('\n' + ' '.repeat(stamp.length)) + '\n';
-  span.title = fullStamp();
+  textEl.textContent = stamp + body.split('\n').join('\n' + ' '.repeat(stamp.length));
+  textEl.title = fullStamp();
+
+  line.appendChild(check);
+  line.appendChild(textEl);
+
   const filterVal = document.getElementById('consoleSourceFilter')?.value || 'all';
-  if (filterVal !== 'all' && src !== filterVal) span.style.display = 'none';
-  el.appendChild(span);
+  if (filterVal !== 'all' && src !== filterVal) line.style.display = 'none';
+
+  el.appendChild(line);
+  while (el.children.length > CONSOLE_MAX_LINES) el.removeChild(el.firstElementChild);
   el.scrollTop = el.scrollHeight;
 }
 
 function applyConsoleFilter() {
   const val = document.getElementById('consoleSourceFilter')?.value || 'all';
-  document.querySelectorAll('#consoleOutput > span').forEach((span) => {
-    span.style.display = (val === 'all' || span.dataset.source === val) ? '' : 'none';
+  document.querySelectorAll('#consoleOutput > .console-line').forEach((line) => {
+    line.style.display = (val === 'all' || line.dataset.source === val) ? '' : 'none';
   });
+  const selectAll = document.getElementById('consoleSelectAll');
+  if (selectAll) selectAll.checked = false;
 }
 document.getElementById('consoleSourceFilter')?.addEventListener('change', applyConsoleFilter);
 
+document.getElementById('consoleSelectAll')?.addEventListener('change', (e) => {
+  const checked = e.target.checked;
+  document.querySelectorAll('#consoleOutput > .console-line').forEach((line) => {
+    if (line.style.display === 'none') return;
+    const box = line.querySelector('.console-line-check');
+    if (box) box.checked = checked;
+  });
+});
+
 document.getElementById('btnCopyConsole')?.addEventListener('click', async () => {
-  const spans = Array.from(document.querySelectorAll('#consoleOutput > span')).filter((s) => s.style.display !== 'none');
-  const text = spans.map((s) => s.textContent).join('');
+  const lines = Array.from(document.querySelectorAll('#consoleOutput > .console-line'));
+  let picked = lines.filter((l) => l.querySelector('.console-line-check')?.checked);
+  if (!picked.length) picked = lines.filter((l) => l.style.display !== 'none');
+  const text = picked.map((l) => l.querySelector('.console-line-text').textContent + '\n').join('');
   if (!text) { toast('Nada para copiar', 'info'); return; }
   try {
     await navigator.clipboard.writeText(text);
-    toast('Log copiado', 'success');
+    toast(`Log copiado (${picked.length} linha(s))`, 'success');
   } catch (err) {
     toast('Falha ao copiar: ' + err.message, 'error');
   }
@@ -787,6 +835,8 @@ document.getElementById('btnCopyConsole')?.addEventListener('click', async () =>
 
 document.getElementById('btnClearConsole').onclick = () => {
   document.getElementById('consoleOutput').innerHTML = '';
+  const selectAll = document.getElementById('consoleSelectAll');
+  if (selectAll) selectAll.checked = false;
 };
 
 // ========== BUTTONS ==========
@@ -1507,8 +1557,10 @@ function showConsoleTab(name) {
   if (expandBtn) expandBtn.style.display = isShell ? 'inline-block' : 'none';
   const sourceFilterEl = document.getElementById('consoleSourceFilter');
   const copyBtn = document.getElementById('btnCopyConsole');
+  const selectAllWrap = document.getElementById('consoleSelectAllWrap');
   if (sourceFilterEl) sourceFilterEl.style.display = isConsole ? 'inline-block' : 'none';
   if (copyBtn) copyBtn.style.display = isConsole ? 'inline-block' : 'none';
+  if (selectAllWrap) selectAllWrap.style.display = isConsole ? 'inline-flex' : 'none';
 
   if (isShell) {
     initTerminal();
@@ -1597,6 +1649,8 @@ document.addEventListener('keydown', (e) => {
 const _origClear = document.getElementById('btnClearConsole').onclick;
 document.getElementById('btnClearConsole').onclick = () => {
   document.getElementById('consoleOutput').innerHTML = '';
+  const selectAll = document.getElementById('consoleSelectAll');
+  if (selectAll) selectAll.checked = false;
   if (term && xtermContainer.style.display !== 'none') {
     term.clear();
     currentLine = '';
@@ -2194,36 +2248,95 @@ function openAiPanel() {
    * Bloco colapsável "⚙ Trabalhou por Ns" com a lista de ferramentas usadas nessa
    * rodada — cada chamada mostra hora exata (estilo "Worked for Ns" do Replit).
    */
-  function addPanelTrace(trace, elapsedSec) {
-    const okCount = trace.filter((tr) => tr.result && tr.result.ok !== false).length;
-    const failCount = trace.length - okCount;
+  const TRACE_MAX_STEPS = 150; // uma rodada gigante do agente não devia travar o painel — mostra só as últimas 150
+
+  function addPanelTrace(traceFull, elapsedSec) {
+    const omitted = Math.max(0, traceFull.length - TRACE_MAX_STEPS);
+    const trace = omitted ? traceFull.slice(-TRACE_MAX_STEPS) : traceFull;
+    const okCount = traceFull.filter((tr) => tr.result && tr.result.ok !== false).length;
+    const failCount = traceFull.length - okCount;
     const now = new Date();
     const details = document.createElement('details');
     details.className = 'ai-ws-trace';
     const summary = document.createElement('summary');
     summary.innerHTML =
       `<span class="trace-icon">⚙</span>` +
-      `<span class="trace-label">Trabalhou por ${elapsedSec}s · ${trace.length} ação(ões)` +
+      `<span class="trace-label">Trabalhou por ${elapsedSec}s · ${traceFull.length} ação(ões)` +
       (failCount ? ` · ${failCount} falha(s)` : '') + `</span>` +
       `<span class="trace-time" title="${escapeHtml(fullStamp(now))}">${escapeHtml(chatStamp(now))}</span>`;
     details.appendChild(summary);
+
+    const tools = Array.from(new Set(trace.map((tr) => tr.tool))).sort();
+    const toolbar = document.createElement('div');
+    toolbar.className = 'trace-toolbar';
+    toolbar.innerHTML =
+      `<select class="trace-filter" title="Filtrar por ferramenta">` +
+      `<option value="all">Tudo</option>` +
+      tools.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('') +
+      `</select>` +
+      `<label class="console-select-all" title="Marcar/desmarcar ações visíveis">` +
+      `<input type="checkbox" class="trace-select-all" /> Todos</label>` +
+      `<button type="button" class="btn-small trace-copy" title="Copiar ações marcadas (ou visíveis, se nenhuma marcada)">📋 Copiar</button>`;
+    details.appendChild(toolbar);
+
     const body = document.createElement('div');
     body.className = 'ai-ws-trace-body';
+    if (omitted) {
+      const note = document.createElement('div');
+      note.className = 'trace-step-omitted';
+      note.textContent = `── ${omitted} ação(ões) mais antiga(s) omitida(s) (mostrando as últimas ${TRACE_MAX_STEPS}) ──`;
+      body.appendChild(note);
+    }
     trace.forEach((tr) => {
       const ok = tr.result && tr.result.ok !== false;
       const err = !ok && tr.result ? (tr.result.error || tr.result.stderr || '') : '';
       const argsPreview = JSON.stringify(tr.args || {}).slice(0, 120);
       const step = document.createElement('div');
       step.className = 'trace-step ' + (ok ? 'ok' : 'err');
+      step.dataset.tool = tr.tool;
+      const stepText =
+        `${ok ? '✔' : '✖'} [${clockStamp(now)}] ${tr.tool} ${argsPreview}` + (err ? ` — ${String(err).slice(0, 220)}` : '');
       step.innerHTML =
+        `<input type="checkbox" class="trace-step-check" />` +
         `<span class="trace-step-icon">${ok ? '✔' : '✖'}</span>` +
         `<span class="trace-step-time" title="${escapeHtml(fullStamp(now))}">${escapeHtml(clockStamp(now))}</span>` +
         `<span class="trace-step-name">${escapeHtml(tr.tool)}</span>` +
         `<span class="trace-step-args">${escapeHtml(argsPreview)}</span>` +
         (err ? `<span class="trace-step-err">${escapeHtml(String(err).slice(0, 220))}</span>` : '');
+      step.dataset.text = stepText;
       body.appendChild(step);
     });
     details.appendChild(body);
+
+    const filterSel = toolbar.querySelector('.trace-filter');
+    const applyTraceFilter = () => {
+      const val = filterSel.value;
+      body.querySelectorAll('.trace-step').forEach((s) => {
+        s.style.display = (val === 'all' || s.dataset.tool === val) ? '' : 'none';
+      });
+      toolbar.querySelector('.trace-select-all').checked = false;
+    };
+    filterSel.addEventListener('change', applyTraceFilter);
+    toolbar.querySelector('.trace-select-all').addEventListener('change', (e) => {
+      body.querySelectorAll('.trace-step').forEach((s) => {
+        if (s.style.display === 'none') return;
+        const box = s.querySelector('.trace-step-check');
+        if (box) box.checked = e.target.checked;
+      });
+    });
+    toolbar.querySelector('.trace-copy').addEventListener('click', async () => {
+      const steps = Array.from(body.querySelectorAll('.trace-step'));
+      let picked = steps.filter((s) => s.querySelector('.trace-step-check')?.checked);
+      if (!picked.length) picked = steps.filter((s) => s.style.display !== 'none');
+      const text = picked.map((s) => s.dataset.text).join('\n');
+      if (!text) { toast('Nada para copiar', 'info'); return; }
+      try {
+        await navigator.clipboard.writeText(text);
+        toast(`Ações copiadas (${picked.length})`, 'success');
+      } catch (err) {
+        toast('Falha ao copiar: ' + err.message, 'error');
+      }
+    });
     msgBox.appendChild(details);
     msgBox.scrollTop = msgBox.scrollHeight;
   }
