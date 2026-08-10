@@ -466,19 +466,38 @@ body {
   color: #d4d4d4;
 }
 
-.console-output .stdout {
+.console-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.console-line-check {
+  flex-shrink: 0;
+  margin-top: 4px;
+  cursor: pointer;
+}
+
+.console-line-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.console-line.stdout .console-line-text {
   color: #d4d4d4;
 }
 
-.console-output .stderr {
-  display: block;
+.console-line.stderr {
   color: var(--error);
   border-left: 3px solid var(--error);
   background: rgba(239, 68, 68, 0.08);
-  padding: 1px 8px;
+  padding: 1px 8px 1px 5px;
+  margin-left: -8px;
 }
 
-.console-output .info {
+.console-line.info .console-line-text {
   color: var(--text-muted);
 }
 
@@ -496,6 +515,21 @@ body {
   font-size: 12px;
   cursor: pointer;
   max-width: 110px;
+}
+
+.console-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.console-select-all input {
+  cursor: pointer;
 }
 
 .console-tabs .tab {
@@ -1858,12 +1892,35 @@ body.mode-mobile .editor-tab {
 .ai-ws-trace summary .trace-icon { flex-shrink: 0; }
 .ai-ws-trace summary .trace-label { flex: 1; }
 .ai-ws-trace summary .trace-time { font-size: 10px; color: #7a7355; flex-shrink: 0; }
-.ai-ws-trace-body {
+.trace-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
   border-top: 1px solid #2e2c1c;
+  flex-wrap: wrap;
+}
+.trace-toolbar .trace-filter {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 11px;
+  max-width: 130px;
+}
+.trace-toolbar .console-select-all { font-size: 11px; }
+.trace-toolbar .trace-copy { font-size: 11px; padding: 3px 8px; }
+.ai-ws-trace-body {
   padding: 6px 12px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.trace-step-omitted {
+  font-size: 11px;
+  color: #7a7355;
+  font-family: monospace;
 }
 .trace-step {
   display: flex;
@@ -1874,7 +1931,15 @@ body.mode-mobile .editor-tab {
   font-family: monospace;
   color: #b8ad86;
 }
+.trace-step-check { flex-shrink: 0; cursor: pointer; }
 .trace-step-icon { flex-shrink: 0; }
+.trace-step.err {
+  border-left: 3px solid #f87171;
+  background: rgba(239, 68, 68, 0.08);
+  padding: 2px 6px 2px 6px;
+  margin-left: -9px;
+  border-radius: 0 4px 4px 0;
+}
 .trace-step.err .trace-step-icon { color: #f87171; }
 .trace-step.ok .trace-step-icon { color: #4ade80; }
 .trace-step-time { color: #6b6548; flex-shrink: 0; }
