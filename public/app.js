@@ -1472,6 +1472,8 @@ function showConsoleTab(name) {
   aiChatArea.style.display = isAi ? 'flex' : 'none';
   aiModelWrap.style.display = isAi ? 'block' : 'none';
   if (consolePanel) consolePanel.classList.toggle('shell-active', isShell);
+  const expandBtn = document.getElementById('btnExpandShell');
+  if (expandBtn) expandBtn.style.display = isShell ? 'inline-block' : 'none';
 
   if (isShell) {
     initTerminal();
@@ -1497,6 +1499,63 @@ document.querySelectorAll('.console-tabs .tab').forEach((tab) => {
     }
     showConsoleTab(name);
   };
+});
+
+// ========== SHELL EM TELA CHEIA (estilo Replit) ==========
+// Reaproveita a mesma instância do xterm — só move o container de DOM pra
+// dentro do overlay e de volta, sem recriar o terminal (preserva scrollback).
+let shellFsAnchor = null; // marcador no lugar original do xtermContainer, pra saber onde devolver
+
+function openShellFullscreen() {
+  if (document.getElementById('shellFsOverlay')) return;
+  initTerminal();
+  shellFsAnchor = document.createComment('xterm-anchor');
+  xtermContainer.parentNode.insertBefore(shellFsAnchor, xtermContainer);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'shellFsOverlay';
+  overlay.className = 'shell-fs-overlay';
+  overlay.innerHTML = `
+    <div class="shell-fs-header">
+      <button type="button" class="ai-ws-back" id="shellFsBack" title="Voltar">←</button>
+      <span class="shell-fs-badge">🐚 Shell</span>
+      <span class="shell-fs-path">~/workspace: bash</span>
+      <div class="shell-fs-actions">
+        <button type="button" class="ai-ws-icon-btn" id="shellFsClear" title="Limpar">🗑</button>
+        <button type="button" class="ai-ws-icon-btn" id="shellFsClose" title="Fechar">✕</button>
+      </div>
+    </div>
+    <div class="shell-fs-body" id="shellFsBody"></div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('shellFsBody').appendChild(xtermContainer);
+  xtermContainer.style.display = 'block';
+
+  const close = () => closeShellFullscreen();
+  document.getElementById('shellFsBack').onclick = close;
+  document.getElementById('shellFsClose').onclick = close;
+  document.getElementById('shellFsClear').onclick = () => {
+    if (term) { term.clear(); currentLine = ''; writePrompt(); }
+  };
+
+  requestAnimationFrame(() => {
+    fitAndFocusTerminal();
+    setTimeout(() => fitAndFocusTerminal(), 80);
+  });
+}
+
+function closeShellFullscreen() {
+  const overlay = document.getElementById('shellFsOverlay');
+  if (!overlay || !shellFsAnchor) return;
+  shellFsAnchor.parentNode.insertBefore(xtermContainer, shellFsAnchor.nextSibling);
+  shellFsAnchor.remove();
+  shellFsAnchor = null;
+  overlay.remove();
+  requestAnimationFrame(() => fitAndFocusTerminal());
+}
+
+document.getElementById('btnExpandShell')?.addEventListener('click', openShellFullscreen);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('shellFsOverlay')) closeShellFullscreen();
 });
 
 // clear also clears xterm when on shell
