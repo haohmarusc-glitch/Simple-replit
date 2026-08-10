@@ -148,17 +148,38 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+// ========== DEEP LINK (?open=monitor|logs|status) ==========
+// Permite outro painel (ex.: o Command Center do Premercado) linkar direto
+// pra uma ferramenta específica em vez de só abrir o editor na raiz.
+const DEEP_LINK_BUTTON = { monitor: 'btnMonitor', status: 'btnMonitor', logs: 'btnLogsAll' };
+function runDeepLink() {
+  const open = new URLSearchParams(location.search).get('open');
+  const btnId = DEEP_LINK_BUTTON[open];
+  if (!btnId) return;
+  if (document.body.classList.contains('mode-mobile') && typeof setMobileView === 'function') {
+    setMobileView('console');
+  } else if (typeof showConsoleTab === 'function') {
+    showConsoleTab('console');
+  }
+  setTimeout(() => document.getElementById(btnId)?.click(), 50);
+}
+
 // Verifica se auth é necessária
 fetch('/api/auth/status')
   .then((r) => r.json())
   .then((s) => {
-    if (s.authRequired && !getAuthToken()) showLoginGate();
-    else if (s.authRequired && getAuthToken()) {
+    if (s.authRequired && !getAuthToken()) {
+      showLoginGate();
+      window.addEventListener('sr-auth', runDeepLink, { once: true });
+    } else if (s.authRequired && getAuthToken()) {
       // valida token
       apiFetch('/api/info').catch(() => {});
+      runDeepLink();
+    } else {
+      runDeepLink();
     }
   })
-  .catch(() => {});
+  .catch(() => { runDeepLink(); });
 
 // ========== MONACO SETUP ==========
 const WELCOME_CODE =
