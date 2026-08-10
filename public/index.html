@@ -31,6 +31,11 @@
         </select>
         <button id="btnRun" class="btn btn-primary" title="Rodar (Ctrl+Enter)">▶ <span class="btn-label">Rodar</span></button>
         <button id="btnSave" class="btn" title="Salvar (Ctrl+S)">💾 <span class="btn-label">Salvar</span></button>
+        <select id="modeSelectTopMobile" class="mode-select mode-select-compact mobile-only" title="Modo de interface">
+          <option value="auto">Auto</option>
+          <option value="desktop">💻</option>
+          <option value="mobile">📱</option>
+        </select>
         <button id="btnAiTop" class="btn desktop-only" title="Assistente AI">✦ <span class="btn-label">AI</span></button>
         <button id="btnDeploy" class="btn btn-deploy desktop-only" title="Deploy">🚀 <span class="btn-label">Deploy</span></button>
         <button id="btnMore" class="btn desktop-only" title="Mais ações">⋯</button>
@@ -217,6 +222,18 @@
                 <option value="deepseek-pro">DeepSeek Pro</option>
               </select>
             </div>
+            <select id="consoleSourceFilter" class="console-source-filter" title="Filtrar log por função">
+              <option value="all">Tudo</option>
+              <option value="run">▶ Rodar</option>
+              <option value="git">⎇ Git</option>
+              <option value="deploy">🚀 Deploy</option>
+              <option value="backup">💾 Backup</option>
+              <option value="logs">📜 Logs</option>
+              <option value="monitor">📊 Monitor</option>
+              <option value="secrets">🔑 Secrets</option>
+              <option value="restart">♻ Restart</option>
+            </select>
+            <button id="btnCopyConsole" class="btn-small" title="Copiar log visível">📋 Copiar</button>
             <button id="btnExpandShell" class="btn-small" style="display:none;" title="Shell em tela cheia">⛶</button>
             <button id="btnClearConsole" class="btn-small">Limpar</button>
           </div>

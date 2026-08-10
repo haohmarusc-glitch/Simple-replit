@@ -705,6 +705,7 @@ async function deleteItem(filePath) {
 
 // ========== RUN CODE ==========
 async function runCode() {
+  consoleActiveSource = 'run';
   const code = editor.getValue();
   const language = document.getElementById('languageSelect').value;
 
@@ -743,18 +744,46 @@ async function runCode() {
 }
 
 // ========== CONSOLE ==========
-function appendConsole(type, text) {
+// Rastreia qual função disparou a última leva de appendConsole (Rodar, Git, Deploy...)
+// pra permitir filtrar/copiar o log por origem sem precisar marcar toda chamada manualmente.
+let consoleActiveSource = 'run';
+
+function appendConsole(type, text, source) {
   const el = document.getElementById('consoleOutput');
   const span = document.createElement('span');
+  const src = source || consoleActiveSource;
   span.className = type;
+  span.dataset.source = src;
   const stamp = `[${clockStamp()}] `;
   const body = text.endsWith('\n') ? text.slice(0, -1) : text;
   // Timestamp só na 1ª linha do bloco (evita repetir em saída multi-linha de comando/deploy).
   span.textContent = stamp + body.split('\n').join('\n' + ' '.repeat(stamp.length)) + '\n';
   span.title = fullStamp();
+  const filterVal = document.getElementById('consoleSourceFilter')?.value || 'all';
+  if (filterVal !== 'all' && src !== filterVal) span.style.display = 'none';
   el.appendChild(span);
   el.scrollTop = el.scrollHeight;
 }
+
+function applyConsoleFilter() {
+  const val = document.getElementById('consoleSourceFilter')?.value || 'all';
+  document.querySelectorAll('#consoleOutput > span').forEach((span) => {
+    span.style.display = (val === 'all' || span.dataset.source === val) ? '' : 'none';
+  });
+}
+document.getElementById('consoleSourceFilter')?.addEventListener('change', applyConsoleFilter);
+
+document.getElementById('btnCopyConsole')?.addEventListener('click', async () => {
+  const spans = Array.from(document.querySelectorAll('#consoleOutput > span')).filter((s) => s.style.display !== 'none');
+  const text = spans.map((s) => s.textContent).join('');
+  if (!text) { toast('Nada para copiar', 'info'); return; }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('Log copiado', 'success');
+  } catch (err) {
+    toast('Falha ao copiar: ' + err.message, 'error');
+  }
+});
 
 document.getElementById('btnClearConsole').onclick = () => {
   document.getElementById('consoleOutput').innerHTML = '';
@@ -773,6 +802,7 @@ document.getElementById('languageSelect').onchange = (e) => {
 
 // ========== GIT ==========
 async function gitAction(endpoint, method = 'GET', body = null) {
+  consoleActiveSource = 'git';
   try {
     const opts = { method };
     if (body) {
@@ -970,6 +1000,7 @@ async function openGitPanel(tab) {
     body.appendChild(box);
 
     document.getElementById('gitDoCommit').onclick = async () => {
+      consoleActiveSource = 'git';
       const msg = document.getElementById('gitCommitMsg').value.trim();
       if (!msg) { toast('Digite a mensagem do commit', 'error'); return; }
       const res = await apiFetch('/api/git/commit', {
@@ -1474,6 +1505,10 @@ function showConsoleTab(name) {
   if (consolePanel) consolePanel.classList.toggle('shell-active', isShell);
   const expandBtn = document.getElementById('btnExpandShell');
   if (expandBtn) expandBtn.style.display = isShell ? 'inline-block' : 'none';
+  const sourceFilterEl = document.getElementById('consoleSourceFilter');
+  const copyBtn = document.getElementById('btnCopyConsole');
+  if (sourceFilterEl) sourceFilterEl.style.display = isConsole ? 'inline-block' : 'none';
+  if (copyBtn) copyBtn.style.display = isConsole ? 'inline-block' : 'none';
 
   if (isShell) {
     initTerminal();
@@ -1574,6 +1609,7 @@ document.getElementById('btnClearConsole').onclick = () => {
 
 // ========== API KEYS (.env) ==========
 document.getElementById('btnApiKeys').onclick = () => {
+  consoleActiveSource = 'secrets';
   openFile('.env');
   appendConsole('info', 'Arquivo .env aberto. Edite as keys e salve (Ctrl+S).');
   appendConsole('info', 'Depois use 🚀 Deploy ou no Shell: docker compose restart app');
@@ -1581,6 +1617,7 @@ document.getElementById('btnApiKeys').onclick = () => {
 
 // ========== DEPLOY (com log ao vivo + backup opcional) ==========
 document.getElementById('btnDeploy').onclick = async () => {
+  consoleActiveSource = 'deploy';
   // OK = com backup · Cancelar = pergunta se quer sem backup
   let withBackup = confirm(
     'Deploy agora?\n\n1. Backup automático\n2. git pull\n3. docker compose up -d --build\n4. status\n\nOK = Deploy COM backup\nCancelar = outras opções'
@@ -1656,6 +1693,7 @@ document.getElementById('btnDeploy').onclick = async () => {
 
 // ========== BACKUP / RESTORE ==========
 document.getElementById('btnBackup').onclick = async () => {
+  consoleActiveSource = 'backup';
   showConsoleTab('console');
   appendConsole('info', '── Criando backup do workspace ──');
   toast('Criando backup...', 'info');
@@ -1685,6 +1723,7 @@ function closeBackupModal() {
 }
 
 async function openRestoreModal() {
+  consoleActiveSource = 'backup';
   closeBackupModal();
   showConsoleTab('console');
   appendConsole('info', '── Carregando lista de backups ──');
@@ -1742,6 +1781,7 @@ async function openRestoreModal() {
 
   list.querySelectorAll('.btn-restore-one').forEach((btn) => {
     btn.onclick = async () => {
+      consoleActiveSource = 'backup';
       const name = btn.dataset.name;
       if (!confirm(`Restaurar o workspace a partir de:\n\n${name}\n\nUm backup de segurança será criado antes.\nContinuar?`)) return;
       btn.disabled = true;
@@ -1801,6 +1841,7 @@ document.getElementById('btnRestore').onclick = () => openRestoreModal();
 let logEventSource = null;
 
 function stopLogStream() {
+  consoleActiveSource = 'logs';
   if (logEventSource) {
     logEventSource.close();
     logEventSource = null;
@@ -1815,6 +1856,7 @@ function stopLogStream() {
 document.getElementById('btnStopLogs').onclick = stopLogStream;
 
 function startLogStream(mode) {
+  consoleActiveSource = 'logs';
   showConsoleTab('console');
 
   if (logEventSource) stopLogStream();
@@ -1851,6 +1893,7 @@ document.getElementById('btnLogsAll').onclick = () => startLogStream('all');
 
 // ========== MONITOR ==========
 document.getElementById('btnMonitor').onclick = async () => {
+  consoleActiveSource = 'monitor';
   appendConsole('info', '── Monitor ──');
   try {
     const res = await apiFetch('/api/monitor');
@@ -1877,6 +1920,7 @@ document.getElementById('btnMonitor').onclick = async () => {
 
 // ========== SECRETS LIST ==========
 document.getElementById('btnSecrets').onclick = async () => {
+  consoleActiveSource = 'secrets';
   appendConsole('info', '── Secrets (.env) ──');
   try {
     const res = await apiFetch('/api/secrets');
@@ -1898,6 +1942,7 @@ document.getElementById('btnSecrets').onclick = async () => {
 // ========== RESTART APP ==========
 document.getElementById('btnRestartApp').onclick = async () => {
   if (!confirm('Reiniciar o container do app (docker compose restart app)?')) return;
+  consoleActiveSource = 'restart';
   appendConsole('info', '── Restart app ──');
   try {
     const res = await apiFetch('/api/workflow', {
@@ -2493,19 +2538,20 @@ document.getElementById('fileTree')?.addEventListener('click', () => {
   }, 80);
 });
 
-// Sync mode selects
-const modeSelectMobile = document.getElementById('modeSelectMobile');
-if (modeSelectMobile && modeSelect) {
-  modeSelectMobile.value = modeSelect.value;
-  modeSelectMobile.onchange = () => {
-    modeSelect.value = modeSelectMobile.value;
-    applyMode(modeSelectMobile.value);
-    closeSheet();
-  };
-  modeSelect.addEventListener('change', () => {
-    modeSelectMobile.value = modeSelect.value;
+// Sync mode selects (menu Tools + atalho na topbar mobile)
+[document.getElementById('modeSelectMobile'), document.getElementById('modeSelectTopMobile')]
+  .filter((el) => el && modeSelect)
+  .forEach((select) => {
+    select.value = modeSelect.value;
+    select.onchange = () => {
+      modeSelect.value = select.value;
+      applyMode(select.value);
+      closeSheet();
+    };
+    modeSelect.addEventListener('change', () => {
+      select.value = modeSelect.value;
+    });
   });
-}
 
 // Patch setMobileView: remove old "actions" view dependency
 const _setMobileView = setMobileView;
