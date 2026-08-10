@@ -527,6 +527,54 @@ body {
   min-height: 120px;
 }
 
+/* Shell em tela cheia (estilo Replit) — reaproveita o mesmo #xtermContainer */
+.shell-fs-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10030;
+  background: #111;
+  display: flex;
+  flex-direction: column;
+}
+.shell-fs-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #0f0f0f;
+  border-bottom: 1px solid #2a2a2a;
+  flex-shrink: 0;
+}
+.shell-fs-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid #333;
+  background: #1a1a1a;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.shell-fs-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-family: monospace;
+  color: #777;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shell-fs-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.shell-fs-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.shell-fs-body .xterm-container { height: 100%; }
+
 /* console panel taller when shell is active */
 .console-panel.shell-active {
   height: 320px;
