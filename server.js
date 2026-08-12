@@ -43,4 +43,14 @@ app.listen(PORT, () => {
   console.log(`Workspace: ${cfg.WORKSPACE}`);
   console.log(`Backups:   ${cfg.BACKUP_DIR}`);
   console.log(`Auth: ${AUTH_TOKEN ? 'obrigatória' : 'desligada'}`);
+
+  if (!AUTH_TOKEN) {
+    console.warn('');
+    console.warn('⚠️  ⚠️  ⚠️  AUTH_TOKEN não definido — API SEM AUTENTICAÇÃO  ⚠️  ⚠️  ⚠️');
+    console.warn('Qualquer pessoa com acesso à rede pode ler/editar/apagar arquivos,');
+    console.warn('rodar comandos de shell e dar push no git deste workspace.');
+    console.warn('Se esta instância está exposta fora de localhost, defina AUTH_TOKEN');
+    console.warn('agora: openssl rand -hex 32   →   export AUTH_TOKEN=...');
+    console.warn('');
+  }
 });
