@@ -164,4 +164,126 @@ function runGitAsync(args) {
   return new Promise((resolve) => runGit(args, resolve));
 }
 
-module.exports = { getSafePath, listFiles, runGit, runGitAsync, loadEnvKeys };
+// Tokenizador simples (aspas simples/duplas balanceadas; sem suporte a \,
+// glob ou expansão de variável) -- suficiente pro subconjunto de comandos da
+// whitelist do /api/shell. De propósito NÃO é um parser de shell completo:
+// não faz sentido reimplementar um shell inteiro só pra nunca invocar um.
+function tokenizeShellWord(str) {
+  const tokens = [];
+  let i = 0;
+  const n = str.length;
+  while (i < n) {
+    while (i < n && /\s/.test(str[i])) i++;
+    if (i >= n) break;
+    let token = '';
+    while (i < n && !/\s/.test(str[i])) {
+      const c = str[i];
+      if (c === '"' || c === "'") {
+        const quote = c;
+        i++;
+        while (i < n && str[i] !== quote) {
+          token += str[i];
+          i++;
+        }
+        i++; // pula a aspa de fechamento (se faltar, só encerra o token aqui)
+      } else {
+        token += c;
+        i++;
+      }
+    }
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+// SECURITY: mesma lógica do runGit acima, generalizada pra qualquer comando
+// da whitelist do /api/shell -- cada estágio de uma pipeline vira um
+// spawn(shell:false) próprio, com o stdout do estágio N ligado ao stdin do
+// N+1 via streams do Node. Como nenhum interpretador de shell roda em
+// momento algum, metacaracteres (; & ` $() > etc.) nunca são reinterpretados
+// -- eles só chegam como texto literal dentro de um argv. Isso troca a
+// defesa de "lista de padrões bloqueados" (que só cobre o que alguém pensou
+// em bloquear) por uma garantia estrutural (não existe shell pra explorar).
+//
+// Efeito colateral aceito: redirecionamento (`cmd > arquivo`) para de
+// funcionar como redirecionamento de verdade no modo whitelist -- vira só
+// mais um argumento literal pro comando (ex.: `echo hi > out.txt` imprime
+// "hi > out.txt" em vez de escrever o arquivo). SHELL_MODE=open continua
+// usando um shell de verdade via exec() para quem precisa desse recurso e
+// aceita o tradeoff de segurança.
+function runShellPipeline(segments, { cwd, timeoutMs = 30000, maxBytes = 3 * 1024 * 1024 } = {}) {
+  const { spawn } = require('child_process');
+  return new Promise((resolve) => {
+    const stages = segments.map((seg) => {
+      const tokens = tokenizeShellWord(seg);
+      return { cmd: tokens[0], args: tokens.slice(1) };
+    });
+    if (stages.some((s) => !s.cmd)) {
+      return resolve({ success: false, output: '', error: 'Comando vazio em um dos estágios do pipe', code: null });
+    }
+
+    const children = [];
+    let killedByTimeout = false;
+    let spawnError = null;
+    const timer = setTimeout(() => {
+      killedByTimeout = true;
+      for (const c of children) {
+        try { c.kill('SIGKILL'); } catch (_) {}
+      }
+    }, timeoutMs);
+
+    let stderrAll = '';
+    let stdoutFinal = '';
+
+    for (let idx = 0; idx < stages.length; idx++) {
+      const { cmd, args } = stages[idx];
+      let child;
+      try {
+        child = spawn(cmd, args, { cwd, shell: false, env: { ...process.env } });
+      } catch (err) {
+        spawnError = err;
+        break;
+      }
+      children.push(child);
+      child.on('error', (err) => {
+        spawnError = spawnError || err;
+      });
+      child.stderr.on('data', (d) => {
+        stderrAll += d.toString();
+        if (stderrAll.length > maxBytes) stderrAll = stderrAll.slice(0, maxBytes);
+      });
+      if (idx === stages.length - 1) {
+        child.stdout.on('data', (d) => {
+          if (stdoutFinal.length <= maxBytes) stdoutFinal += d.toString();
+        });
+      }
+      if (idx > 0) {
+        children[idx - 1].stdout.pipe(child.stdin);
+      }
+    }
+
+    if (children.length === 0) {
+      clearTimeout(timer);
+      return resolve({ success: false, output: '', error: (spawnError && spawnError.message) || 'Falha ao iniciar comando', code: null });
+    }
+
+    const last = children[children.length - 1];
+    last.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({
+        success: code === 0 && !killedByTimeout && !spawnError,
+        output: stdoutFinal.slice(0, maxBytes).trim(),
+        error: killedByTimeout
+          ? 'Tempo limite excedido'
+          : (spawnError ? spawnError.message : stderrAll.trim()),
+        code,
+      });
+    });
+    last.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ success: false, output: '', error: err.message, code: null });
+    });
+  });
+}
+
+module.exports = { getSafePath, listFiles, runGit, runGitAsync, loadEnvKeys, runShellPipeline };
